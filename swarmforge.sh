@@ -1,7 +1,6 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-SESSION_PREFIX="swarmforge"
 AGENT_WINDOW="swarm"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -12,6 +11,11 @@ RESET='\033[0m'
 
 WORKING_DIR="${1:-$PWD}"
 WORKING_DIR="$(cd "$WORKING_DIR" && pwd)"
+
+# Namespace tmux sessions by project directory basename so multiple
+# swarms can run in parallel without colliding. Override with
+# SWARMFORGE_PREFIX=myname if you need a custom name.
+SESSION_PREFIX="${SWARMFORGE_PREFIX:-swarmforge-$(basename "$WORKING_DIR")}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SWARM_FORGE_DIR="$WORKING_DIR/swarmforge"
 SWARM_TOOLS_DIR="$WORKING_DIR/swarmtools"
