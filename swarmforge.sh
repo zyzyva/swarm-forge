@@ -397,18 +397,16 @@ launch_role() {
   # Pin the Claude Code effort level per role so each agent runs at an
   # appropriate reasoning budget regardless of shell or tmux env
   # inheritance. Per-role env vars win; SWARMFORGE_EFFORT is a shared
-  # fallback. Defaults pair with the per-role model defaults below:
-  # Opus roles (architect, reviewer) get xhigh because Opus honors it
-  # and their mistakes compound. Coder defaults to high because Sonnet
-  # silently downgrades xhigh to high, so high is the real ceiling on
-  # the coder pane anyway.
+  # fallback. All roles default to xhigh because every role now runs on
+  # Opus, which honors xhigh and benefits from it. Override per-role with
+  # SWARMFORGE_<ROLE>_EFFORT (e.g. SWARMFORGE_CODER_EFFORT=high).
   local agent_effort
   case "$role" in
     architect|architect-*)
       agent_effort="${SWARMFORGE_ARCHITECT_EFFORT:-${SWARMFORGE_EFFORT:-xhigh}}"
       ;;
     coder|coder-*)
-      agent_effort="${SWARMFORGE_CODER_EFFORT:-${SWARMFORGE_EFFORT:-high}}"
+      agent_effort="${SWARMFORGE_CODER_EFFORT:-${SWARMFORGE_EFFORT:-xhigh}}"
       ;;
     reviewer|reviewer-*)
       agent_effort="${SWARMFORGE_REVIEWER_EFFORT:-${SWARMFORGE_EFFORT:-xhigh}}"
@@ -418,19 +416,21 @@ launch_role() {
       ;;
   esac
 
-  # Pick the Claude model per role. Opus's deeper reasoning is worth the
-  # premium for the architect (planning) and reviewer (verification);
-  # Sonnet handles spec-driven coder work at a fraction of the cost,
-  # which matters because the coder spends the most turns. Per-role env
-  # vars win; SWARMFORGE_MODEL is a shared fallback. Empty string means
-  # "let claude inherit the global default" — used for unknown roles.
+  # Pick the Claude model per role. Opus is the default for every role —
+  # the coder previously ran on Sonnet as a cost lever, but in practice
+  # Opus across the board produces better slice-quality and the cost
+  # delta is acceptable. Per-role env vars win; SWARMFORGE_MODEL is a
+  # shared fallback. Empty string means "let claude inherit the global
+  # default" — used for unknown roles. Override the coder back to Sonnet
+  # with SWARMFORGE_CODER_MODEL=claude-sonnet-4-6 if cost becomes the
+  # constraint again.
   local agent_model
   case "$role" in
     architect|architect-*)
       agent_model="${SWARMFORGE_ARCHITECT_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-7}}"
       ;;
     coder|coder-*)
-      agent_model="${SWARMFORGE_CODER_MODEL:-${SWARMFORGE_MODEL:-claude-sonnet-4-6}}"
+      agent_model="${SWARMFORGE_CODER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-7}}"
       ;;
     reviewer|reviewer-*)
       agent_model="${SWARMFORGE_REVIEWER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-7}}"
