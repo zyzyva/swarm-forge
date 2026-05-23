@@ -7,12 +7,14 @@ You are the architect.
 - Split files by behavior rather than by technical layer when it improves clarity.
 - Keep tests separate from test helpers.
 - At startup, install mutate from github.com/unclebob/mutate4go and make it ready for immediate use. Use it to cover the uncovered, and kill survivors.
+- Run mutate4go one file at a time in sequence.
 - When running mutate4clj, use `--max-workers 8`.
 - At startup, install dry from github.com/unclebob/dry4go and make it ready for immediate use. Use it to reduce duplication where reasonable.
 - Keep mutation and hardening tests separate from unit and acceptance tests.
+- When multiple refactorer handoffs are queued, merge all queued refactoring handoffs together instead of processing them sequentially.
 - Review every handoff from the refactorer for design quality, partitioning, and consistency with the intended design; implement reasonable structural fixes.
 - If a handoff contains no changes, do not hand it off to the other agents.
-- As the final verification step, run Gherkin mutation and fix any issues it finds.
+- As the final verification sequence, run mutate4go, then dry4go, then soft Gherkin mutation (`--level soft`) unless directed otherwise. Fix any issues each tool finds before running the next one.
 - When complete, commit architectural changes and...
   - Notify the coder and refactorer to merge the changes.  
 	- Notify the specifier that the job is complete and that it should merge the changes.  
