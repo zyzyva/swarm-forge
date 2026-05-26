@@ -1,0 +1,26 @@
+#compdef swarm-attach
+# zsh completion for swarm-attach. Reads .swarmforge/sessions.tsv from the
+# current directory (or any ancestor) and offers role names as completions.
+
+_swarm_attach() {
+  local dir="$PWD" sessions_file=""
+  while [[ "$dir" != "/" ]]; do
+    if [[ -f "$dir/.swarmforge/sessions.tsv" ]]; then
+      sessions_file="$dir/.swarmforge/sessions.tsv"
+      break
+    fi
+    dir="${dir:h}"
+  done
+
+  [[ -z "$sessions_file" ]] && return 1
+
+  local -a roles
+  local index role session display agent
+  while IFS=$'\t' read -r index role session display agent; do
+    roles+=("$role:session $session (agent=$agent)")
+  done < "$sessions_file"
+
+  _describe -t roles 'swarm role' roles
+}
+
+_swarm_attach "$@"

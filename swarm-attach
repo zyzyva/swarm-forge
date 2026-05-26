@@ -1,0 +1,47 @@
+#!/usr/bin/env zsh
+# swarm-attach — attach to a running SwarmForge tmux session by role name or index.
+#
+# Reads $PWD/.swarmforge/sessions.tsv (written at swarm startup) to map a role
+# name like "coder" or an index like "2" to the namespaced tmux session.
+
+set -euo pipefail
+
+find_project_dir() {
+  local dir="$PWD"
+  while [[ "$dir" != "/" ]]; do
+    if [[ -f "$dir/.swarmforge/sessions.tsv" ]]; then
+      echo "$dir"
+      return 0
+    fi
+    dir="${dir:h}"
+  done
+  return 1
+}
+
+PROJECT_DIR="$(find_project_dir)" || {
+  echo "swarm-attach: no swarm found (walked up from $PWD looking for .swarmforge/sessions.tsv)" >&2
+  exit 1
+}
+
+SESSIONS_FILE="$PROJECT_DIR/.swarmforge/sessions.tsv"
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: swarm-attach <role|index>" >&2
+  echo "" >&2
+  echo "Available roles in $PROJECT_DIR:" >&2
+  while IFS=$'\t' read -r index role session display agent; do
+    echo "  $index  $role  ($session, agent=$agent)" >&2
+  done < "$SESSIONS_FILE"
+  exit 1
+fi
+
+target="${1:l}"
+while IFS=$'\t' read -r index role session display agent; do
+  if [[ "$target" == "${index:l}" || "$target" == "${role:l}" ]]; then
+    exec tmux attach-session -t "$session"
+  fi
+done < "$SESSIONS_FILE"
+
+echo "swarm-attach: unknown role or index '$1'" >&2
+echo "Run swarm-attach with no arguments to list available roles." >&2
+exit 1
