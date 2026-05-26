@@ -35,13 +35,22 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
-target="${1:l}"
-while IFS=$'\t' read -r index role session display agent; do
-  if [[ "$target" == "${index:l}" || "$target" == "${role:l}" ]]; then
-    exec tmux attach-session -t "$session"
-  fi
-done < "$SESSIONS_FILE"
+resolve_session() {
+  local target="${1:l}"
+  local index role session display agent
+  while IFS=$'\t' read -r index role session display agent; do
+    if [[ "$target" == "${index:l}" || "$target" == "${role:l}" ]]; then
+      echo "$session"
+      return 0
+    fi
+  done < "$SESSIONS_FILE"
+  return 1
+}
 
-echo "swarm-attach: unknown role or index '$1'" >&2
-echo "Run swarm-attach with no arguments to list available roles." >&2
-exit 1
+TARGET_SESSION="$(resolve_session "$1")" || {
+  echo "swarm-attach: unknown role or index '$1'" >&2
+  echo "Run swarm-attach with no arguments to list available roles." >&2
+  exit 1
+}
+
+exec tmux attach-session -t "$TARGET_SESSION"
