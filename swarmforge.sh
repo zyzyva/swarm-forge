@@ -36,6 +36,7 @@ typeset -a SESSIONS=()
 typeset -a DISPLAY_NAMES=()
 typeset -a WORKTREE_NAMES=()
 typeset -a WORKTREE_PATHS=()
+typeset -a NOTIFY_TARGETS=()
 typeset -A ROLE_INDEX=()
 typeset -A WORKTREE_INDEX=()
 typeset -i CLEANUP_OWNER_INDEX=1
@@ -55,6 +56,7 @@ ensure_initial_gitignore() {
     cat > "$gitignore_file" <<'EOF'
 .swarmforge/
 .worktrees/
+.sidecar/
 swarmtools/
 logs/
 agent_context/
@@ -80,6 +82,10 @@ EOF
 
   if ! grep -qx 'swarmtools/' "$gitignore_file"; then
     echo 'swarmtools/' >> "$gitignore_file"
+  fi
+
+  if ! grep -qx '.sidecar/' "$gitignore_file"; then
+    echo '.sidecar/' >> "$gitignore_file"
   fi
 }
 
@@ -158,8 +164,8 @@ parse_config() {
 
     local -a fields
     fields=(${=line})
-    if (( ${#fields[@]} != 4 )); then
-      echo -e "${RED}Error:${RESET} Invalid config line $line_no: $line"
+    if (( ${#fields[@]} < 4 || ${#fields[@]} > 5 )); then
+      echo -e "${RED}Error:${RESET} Invalid config line $line_no: $line (expected 4-5 fields)"
       exit 1
     fi
 
@@ -167,6 +173,7 @@ parse_config() {
     role="${fields[2]}"
     agent="${fields[3]:l}"
     worktree="${fields[4]}"
+    local notify_target="${fields[5]:-}"
 
     if [[ "$keyword" != "window" ]]; then
       echo -e "${RED}Error:${RESET} Unknown config directive on line $line_no: $keyword"
@@ -189,7 +196,7 @@ parse_config() {
     fi
 
     case "$agent" in
-      claude|codex|none) ;;
+      claude|codex|aider|none) ;;
       *)
         echo -e "${RED}Error:${RESET} Unsupported agent '$agent' for role '$role'"
         exit 1
@@ -210,6 +217,7 @@ parse_config() {
     SESSIONS+=("$(session_name_for_role "$role")")
     DISPLAY_NAMES+=("$(display_name_for_role "$role")")
     WORKTREE_NAMES+=("$worktree")
+    NOTIFY_TARGETS+=("$notify_target")
     if [[ "$worktree" == "none" || "$worktree" == "master" ]]; then
       WORKTREE_PATHS+=("$WORKING_DIR")
     else
@@ -221,6 +229,15 @@ parse_config() {
     echo -e "${RED}Error:${RESET} No windows defined in $CONFIG_FILE"
     exit 1
   fi
+
+  local j nt
+  for (( j = 1; j <= ${#ROLES[@]}; j++ )); do
+    nt="${NOTIFY_TARGETS[$j]}"
+    if [[ -n "$nt" && -z "${ROLE_INDEX[$nt]:-}" ]]; then
+      echo -e "${RED}Error:${RESET} Notify target '$nt' for role '${ROLES[$j]}' not found in config"
+      exit 1
+    fi
+  done
 }
 
 write_sessions_file() {
@@ -238,7 +255,7 @@ write_sessions_file() {
 
 check_helper_scripts() {
   local helper
-  for helper in swarm-cleanup.sh swarm-window-watchdog.sh swarmlog.sh; do
+  for helper in swarm-cleanup.sh swarm-window-watchdog.sh swarmlog.sh swarm-aider-sidecar.sh; do
     if [[ ! -x "$SCRIPT_DIR/$helper" ]]; then
       echo -e "${RED}Error:${RESET} Required helper script not found or not executable: $SCRIPT_DIR/$helper"
       exit 1
@@ -274,8 +291,14 @@ PROJECT_DIR="$(find_project_dir)"
 SESSIONS_FILE="$PROJECT_DIR/.swarmforge/sessions.tsv"
 LOG_FILE="$PROJECT_DIR/logs/agent_messages.log"
 
+MERGE_BRANCH=""
+if [[ "${1:-}" == "--merge" ]]; then
+  MERGE_BRANCH="$2"
+  shift 2
+fi
+
 if [[ $# -lt 2 ]]; then
-  echo "Usage: notify-agent.sh <target-role-or-index> \"message\"" >&2
+  echo "Usage: notify-agent.sh [--merge <branch>] <target-role-or-index> \"message\"" >&2
   exit 1
 fi
 
@@ -284,13 +307,13 @@ if [[ ! -f "$SESSIONS_FILE" ]]; then
   exit 1
 fi
 
-resolve_session() {
+resolve_target() {
   local target="${1:l}"
   local index role session display agent
 
   while IFS=$'\t' read -r index role session display agent; do
     if [[ "$target" == "${index:l}" || "$target" == "${role:l}" ]]; then
-      echo "$session"
+      echo "${session}\t${role}\t${agent}"
       return 0
     fi
   done < "$SESSIONS_FILE"
@@ -298,15 +321,28 @@ resolve_session() {
   return 1
 }
 
-TARGET_SESSION=$(resolve_session "$1") || {
+TARGET_INFO=$(resolve_target "$1") || {
   echo "Unknown target: $1" >&2
   exit 1
 }
+
+TARGET_SESSION="${TARGET_INFO%%$'\t'*}"
+TARGET_ROLE_AGENT="${TARGET_INFO#*$'\t'}"
+TARGET_ROLE="${TARGET_ROLE_AGENT%%$'\t'*}"
+TARGET_AGENT="${TARGET_ROLE_AGENT#*$'\t'}"
 
 MESSAGE="${*:2}"
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 mkdir -p "$PROJECT_DIR/logs"
 echo "[$TIMESTAMP] [$TARGET_SESSION] $MESSAGE" >> "$LOG_FILE"
+
+if [[ -n "$MERGE_BRANCH" && "$TARGET_AGENT" == "aider" ]]; then
+  OPS_QUEUE="$PROJECT_DIR/.swarmforge/ops/${TARGET_ROLE}.queue"
+  mkdir -p "$(dirname "$OPS_QUEUE")"
+  echo "merge $MERGE_BRANCH" >> "$OPS_QUEUE"
+  echo "[$TIMESTAMP] [$TARGET_SESSION] [ops] merge $MERGE_BRANCH" >> "$LOG_FILE"
+fi
+
 tmux send-keys -t "${TARGET_SESSION}:0.0" -l -- "$MESSAGE"
 sleep 0.15
 tmux send-keys -t "${TARGET_SESSION}:0.0" C-m
@@ -318,7 +354,7 @@ EOF
 }
 
 prepare_workspace() {
-  mkdir -p "$WORKING_DIR/logs" "$WORKING_DIR/agent_context" "$STATE_DIR" "$PROMPTS_DIR" "$SWARM_TOOLS_DIR" "$WORKTREES_DIR"
+  mkdir -p "$WORKING_DIR/logs" "$WORKING_DIR/agent_context" "$STATE_DIR" "$PROMPTS_DIR" "$SWARM_TOOLS_DIR" "$WORKTREES_DIR" "$STATE_DIR/ops"
   check_helper_scripts
   write_sessions_file
   write_notify_script
@@ -349,6 +385,7 @@ check_backend_dependencies() {
     case "${AGENTS[$i]}" in
       claude) check_dependency claude ;;
       codex) check_dependency codex ;;
+      aider) check_dependency aider ;;
     esac
   done
 }
@@ -365,12 +402,26 @@ create_role_session() {
 write_agent_instruction_file() {
   local role="$1"
   local prompt_file="$2"
+  local agent="${3:-claude}"
 
-  cat > "$prompt_file" <<EOF
+  if [[ "$agent" == "aider" ]]; then
+    cat > "$prompt_file" <<EOF
+Read swarmforge/constitution.prompt, then read every file it refers to recursively, and obey all of those instructions.
+Read swarmforge/${role}.prompt, then read every file it refers to recursively, and follow all of those instructions.
+
+A sidecar process handles operations you cannot perform directly:
+- Merges from other branches happen automatically. When notified of a merge, re-read any files you are working on.
+- To run a shell command, write it as a single line to .sidecar/commands (append, do not overwrite). The sidecar executes it and writes output to .sidecar/results. Wait a few seconds then read .sidecar/results.
+- Destructive commands (rm -rf, git push, git reset --hard, etc.) are blocked by the sidecar safety filter.
+- Outbound handoff notifications are sent automatically when you commit. Focus on your work and commit when a slice is complete.
+EOF
+  else
+    cat > "$prompt_file" <<EOF
 Read swarmforge/constitution.prompt, then read every file it refers to recursively, and obey all of those instructions.
 Read swarmforge/${role}.prompt, then read every file it refers to recursively, and follow all of those instructions.
 For handoffs, run $SWARM_TOOLS_DIR/notify-agent.sh directly instead of relying on PATH lookup.
 EOF
+  fi
 }
 
 launch_role() {
@@ -392,7 +443,7 @@ launch_role() {
     return
   fi
 
-  write_agent_instruction_file "$role" "$prompt_file"
+  write_agent_instruction_file "$role" "$prompt_file" "$agent"
 
   # Pin the Claude Code effort level per role so each agent runs at an
   # appropriate reasoning budget regardless of shell or tmux env
@@ -400,6 +451,8 @@ launch_role() {
   # fallback. All roles default to xhigh because every role now runs on
   # Opus, which honors xhigh and benefits from it. Override per-role with
   # SWARMFORGE_<ROLE>_EFFORT (e.g. SWARMFORGE_CODER_EFFORT=high).
+  # Effort levels are a Claude Code concept and do not apply to the aider
+  # backend.
   local agent_effort
   case "$role" in
     architect|architect-*)
@@ -416,14 +469,14 @@ launch_role() {
       ;;
   esac
 
-  # Pick the Claude model per role. Opus is the default for every role —
-  # the coder previously ran on Sonnet as a cost lever, but in practice
-  # Opus across the board produces better slice-quality and the cost
-  # delta is acceptable. Per-role env vars win; SWARMFORGE_MODEL is a
-  # shared fallback. Empty string means "let claude inherit the global
-  # default" — used for unknown roles. Override the coder back to Sonnet
-  # with SWARMFORGE_CODER_MODEL=claude-sonnet-4-6 if cost becomes the
-  # constraint again.
+  # Pick the model per role. Opus is the default for every role. For
+  # claude and codex backends this selects an Anthropic model; for aider
+  # it can be any provider/model string that aider supports
+  # (e.g. fireworks_ai/accounts/fireworks/models/kimi-k2-6). Per-role
+  # env vars win; SWARMFORGE_MODEL is a shared fallback. Empty string
+  # means "let the backend inherit its own default". Override the coder
+  # back to Sonnet with SWARMFORGE_CODER_MODEL=claude-sonnet-4-6 if cost
+  # becomes the constraint again.
   local agent_model
   case "$role" in
     architect|architect-*)
@@ -454,6 +507,12 @@ launch_role() {
       ;;
     codex)
       launch_cmd="export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && codex -C '$role_worktree' \"\$(cat '$prompt_file')\""
+      ;;
+    aider)
+      local aider_flags="${SWARMFORGE_AIDER_FLAGS:-}"
+      local notify_target="${NOTIFY_TARGETS[$index]}"
+      local sidecar_cmd="'$SCRIPT_DIR/swarm-aider-sidecar.sh' '$role_worktree' '$role' '$WORKING_DIR' '$session' '$notify_target' &"
+      launch_cmd="export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && $sidecar_cmd aider ${model_flag}--yes-always --read '$SWARM_FORGE_DIR/constitution.prompt' --read '$SWARM_FORGE_DIR/${role}.prompt' --read '$prompt_file' $aider_flags --message \"\$(cat '$prompt_file')\""
       ;;
   esac
 

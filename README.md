@@ -19,7 +19,7 @@ SwarmForge is a lightweight, tmux-based orchestration layer that:
 - Launches a **config-driven swarm** from a project-local `swarmforge/swarmforge.conf`
 - Creates one tmux session and one Terminal window per configured role
 - Reads behavior from project-local `swarmforge/<role>.prompt` files plus a layered `swarmforge/constitution.prompt`
-- Supports per-role backends such as `claude`, `codex`, or `none`
+- Supports per-role backends such as `claude`, `codex`, `aider`, or `none`
 - Creates a project-local `swarmtools/` directory with notification helpers for the active swarm
 - Creates one git worktree per configured role under `.worktrees/`
 - Initializes a git repository in a new working directory and creates a first commit with `logs/` and `agent_context/` ignored
@@ -30,7 +30,7 @@ SwarmForge is a lightweight, tmux-based orchestration layer that:
 - **Config-Driven Topology** — The swarm shape comes from `swarmforge/swarmforge.conf`, not hardcoded shell variables.
 - **Project-Local Roles** — Each role is defined by `swarmforge/<role>.prompt` in the working tree being orchestrated.
 - **Layered Constitution** — `swarmforge/constitution.prompt` can delegate to subordinate files such as `swarmforge/constitution/project.prompt`, `engineering.prompt`, and `workflow.prompt`.
-- **Backend Selection Per Role** — A role can launch `claude`, `codex`, or no agent at all.
+- **Backend Selection Per Role** — A role can launch `claude`, `codex`, `aider`, or no agent at all.
 - **Observable Swarm** — Open one Terminal window per role and watch the sessions in real time.
 - **Self-Hosted & Lightweight** — Runs locally in tmux and Terminal with minimal machinery.
 
@@ -79,8 +79,10 @@ The default three-agent workflow is:
 `swarmforge/swarmforge.conf` defines the swarm window-by-window. Each line has this form:
 
 ```conf
-window <role> <agent> <worktree>
+window <role> <agent> <worktree> [notify-target]
 ```
+
+The optional `notify-target` field names another role to auto-notify when the sidecar detects a new commit in this role's worktree. This is primarily useful for `aider` backends that cannot call `notify-agent.sh` directly.
 
 You can define as many windows as your project needs. Each `role` maps to a corresponding prompt file at `swarmforge/<role>.prompt`, so a config containing `architect`, `coder`, `reviewer`, `research`, and `release` windows would expect:
 
@@ -126,11 +128,114 @@ Agents launched with the `claude` backend inherit every Claude Code skill instal
 
 A few things to keep in mind:
 
-- Skills are a Claude Code feature. Agents launched with the `codex` backend do not have access to skills, and any skill instructions in their prompt will be ignored.
+- Skills are a Claude Code feature. Agents launched with the `codex` or `aider` backend do not have access to skills, and any skill instructions in their prompt will be ignored.
 - Skill availability depends on what the user running SwarmForge has installed. If a prompt names a skill that is not installed, tell the agent to note it in its handoff rather than skip silently so drift is visible.
 - Role prompts are the right place to wire skills in. Put skill invocation rules near the handoff step of the role that owns that quality gate (coder for pre-handoff cleanup, reviewer for verification).
 
 See `examples/clojureHTW-pairs/swarmforge/coder.base.prompt` and `reviewer.base.prompt` for a worked example of skill usage in role prompts.
+
+## Mixed-Model Swarms With The `aider` Backend
+
+The `aider` backend lets you run open-source or third-party models alongside Claude in the same swarm. Aider supports any model provider that offers an OpenAI-compatible API (Fireworks, Together, OpenRouter, Groq, local Ollama, etc.) via LiteLLM.
+
+A typical mixed-model config uses Claude Opus for planning and review, and a cheaper or open-source model for implementation. The optional 5th field specifies the auto-notify target — when the aider agent commits, the sidecar notifies that role automatically:
+
+```conf
+window architect claude master
+window coder    aider  coder   reviewer
+window reviewer claude reviewer
+```
+
+### Model Selection
+
+Set the aider model per role using the same env vars as other backends:
+
+```sh
+export SWARMFORGE_CODER_MODEL="fireworks_ai/accounts/fireworks/models/kimi-k2-6"
+export FIREWORKS_API_KEY="your-key"
+```
+
+Any model string that aider accepts works here. See [aider's model documentation](https://aider.chat/docs/llms.html) for the full list of supported providers and model name formats.
+
+### API Keys
+
+Aider reads API keys from environment variables matching the provider. Export the relevant key before running `swarm`:
+
+| Provider | Environment Variable |
+|---|---|
+| Fireworks | `FIREWORKS_API_KEY` |
+| Together | `TOGETHER_API_KEY` |
+| OpenRouter | `OPENROUTER_API_KEY` |
+| Groq | `GROQ_API_KEY` |
+| OpenAI | `OPENAI_API_KEY` |
+| Ollama | No key needed (local) |
+
+### Extra Aider Flags
+
+Pass additional aider CLI flags through `SWARMFORGE_AIDER_FLAGS`:
+
+```sh
+export SWARMFORGE_AIDER_FLAGS="--auto-commits --dark-mode"
+```
+
+### Prompt Delivery
+
+Aider receives context differently from Claude Code and Codex. SwarmForge passes the constitution, role prompt, and instruction file as `--read` files so aider loads them into its context, and sends the instruction file content as the initial `--message`.
+
+### Autonomous Operation And Safety
+
+Aider does **not** execute arbitrary shell commands — it is a file editor and git client. The `--yes-always` flag (included automatically) auto-approves file edits only. This is closer to Claude Code's `auto` mode than `bypassPermissions`:
+
+| Operation | Behavior |
+|---|---|
+| File edits | Auto-approved (isolated in worktree, auto-committed, fully reversible) |
+| Git commits | Auto via `--auto-commits` (in worktree, not pushed) |
+| Lint/test | Only through `--auto-lint` / `--auto-test` with a command you specify |
+| Shell commands | Not executed by aider. Handled by the sidecar (see below). |
+
+For test-driven autonomy, add `--auto-test` with your project's test command:
+
+```sh
+export SWARMFORGE_AIDER_FLAGS="--auto-test --test-cmd 'go test ./...'"
+```
+
+### The Aider Sidecar
+
+Aider cannot run shell commands, call `notify-agent.sh`, or execute `git merge`. SwarmForge starts a **sidecar process** alongside every aider agent to bridge this gap. The sidecar handles three things:
+
+**Commit watcher** — polls the worktree for new commits and sends a handoff notification to the role specified in the 5th config field. The architect and reviewer hear from the coder automatically.
+
+**Merge handler** — when another agent calls `notify-agent.sh --merge <branch> coder "message"`, the script writes a merge operation to `.swarmforge/ops/<role>.queue`. The sidecar picks it up and executes `git merge` in the aider worktree. If the merge fails, it aborts and notifies aider of the conflict.
+
+**Command runner** — aider can write shell commands to `.sidecar/commands` (one per line) since file editing is its core capability. The sidecar executes them and writes output to `.sidecar/results`. A **deny list** blocks destructive commands (`rm -rf`, `git push`, `git reset --hard`, `sudo`, pipe-to-shell, etc.).
+
+The sidecar runs as a background process in the same tmux session and dies when the session is killed. Logs go to `logs/sidecar-<role>.log`.
+
+### Handoffs With `--merge`
+
+When an agent needs the aider coder to merge, use the `--merge` flag:
+
+```bash
+notify-agent.sh --merge swarmforge-architect coder "Review your rules. Merge from branch swarmforge-architect (abc1234). Here is what changed..."
+```
+
+For `claude` and `codex` targets, `--merge` is ignored (the agent handles merges itself). For `aider` targets, the merge is routed to the sidecar. The text message is still sent to aider for context either way.
+
+### Adapting Prompts For Less Capable Models
+
+Open-source models may need more explicit instructions than Claude. The generic example prompts include optional guidance sections for this:
+
+- `examples/generic/swarmforge/architect.prompt` has an "Explicit Handoffs For Less Capable Coders" section — the architect names exact files, spells out the approach, and gives concrete examples instead of relying on the coder to infer intent.
+- `examples/generic/swarmforge/reviewer.prompt` has a "Reviewing Work From Less Capable Coders" section — the reviewer gives exact fix instructions, checks for hallucinated APIs, and lists all issues in a single rejection instead of one at a time.
+
+Copy these sections into your project's role prompts when using a less capable model for the coder.
+
+### Limitations
+
+- Skills are a Claude Code feature and are not available to the `aider` backend.
+- Effort levels (`SWARMFORGE_EFFORT`, `SWARMFORGE_CODER_EFFORT`, etc.) are a Claude Code concept and do not apply to aider.
+- Slash commands like `/compact` and `/clear` are Claude Code features. Use `/reset` in aider to clear its context instead.
+- The sidecar command runner uses `eval` — the deny list blocks known-dangerous patterns but is not a sandbox. For high-security environments, run the swarm in a container.
 
 ## Examples
 
