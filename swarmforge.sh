@@ -596,7 +596,7 @@ launch_role() {
   local agent_effort
   case "$role" in
     architect|architect-*)
-      agent_effort="${SWARMFORGE_ARCHITECT_EFFORT:-${SWARMFORGE_EFFORT:-xhigh}}"
+      agent_effort="${SWARMFORGE_ARCHITECT_EFFORT:-${SWARMFORGE_EFFORT:-max}}"
       ;;
     coder|coder-*)
       agent_effort="${SWARMFORGE_CODER_EFFORT:-${SWARMFORGE_EFFORT:-xhigh}}"
