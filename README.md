@@ -19,7 +19,7 @@ SwarmForge is a lightweight, tmux-based orchestration layer that:
 - Launches a **config-driven swarm** from a project-local `swarmforge/swarmforge.conf`
 - Creates one tmux session and one Terminal window per configured role
 - Reads behavior from project-local `swarmforge/<role>.prompt` files plus a layered `swarmforge/constitution.prompt`
-- Supports per-role backends such as `claude`, `codex`, `aider`, or `none`
+- Supports per-role backends such as `claude`, `codex`, `aider`, `copilot`, `grok`, or `none`
 - Creates a project-local `swarmtools/` directory with notification helpers for the active swarm
 - Creates one git worktree per configured role under `.worktrees/`
 - Initializes a git repository in a new working directory and creates a first commit with `logs/` and `agent_context/` ignored
@@ -30,7 +30,7 @@ SwarmForge is a lightweight, tmux-based orchestration layer that:
 - **Config-Driven Topology** — The swarm shape comes from `swarmforge/swarmforge.conf`, not hardcoded shell variables.
 - **Project-Local Roles** — Each role is defined by `swarmforge/<role>.prompt` in the working tree being orchestrated.
 - **Layered Constitution** — `swarmforge/constitution.prompt` can delegate to subordinate files such as `swarmforge/constitution/project.prompt`, `engineering.prompt`, and `workflow.prompt`.
-- **Backend Selection Per Role** — A role can launch `claude`, `codex`, `aider`, or no agent at all.
+- **Backend Selection Per Role** — A role can launch `claude`, `codex`, `aider`, `copilot`, `grok`, or no agent at all.
 - **Observable Swarm** — Open one Terminal window per role and watch the sessions in real time.
 - **Self-Hosted & Lightweight** — Runs locally in tmux and Terminal with minimal machinery.
 
@@ -59,8 +59,6 @@ The default three-agent workflow is:
 - `coder` implements one small slice at a time and hands off completed work
 - `reviewer` performs deeper verification and quality checks before final handoff
 
-`logger` remains an optional utility role with no agent backend.
-
 ## How It Works (High Level)
 
 1. Create a `swarmforge/` directory in the target working directory.
@@ -72,7 +70,7 @@ The default three-agent workflow is:
 7. Startup creates a git worktree for each window under `.worktrees/<worktree>`, unless the worktree field is `none` or `master`.
 8. Startup creates `swarmtools/notify-agent.sh` for that project.
 9. SwarmForge creates tmux sessions, opens Terminal windows, and launches each configured backend in its assigned worktree.
-10. Roles communicate through helper commands such as `notify-agent.sh`.
+10. Roles communicate through helper commands such as `notify-agent.sh <role> --file <message-file>`.
 
 ## The `swarmforge.conf` File
 
@@ -92,15 +90,100 @@ You can define as many windows as your project needs. Each `role` maps to a corr
 - `swarmforge/research.prompt`
 - `swarmforge/release.prompt`
 
-This lets each project choose its own swarm shape instead of being locked to a fixed set of roles. The only special case is a utility role such as `logger` using the `none` backend, which opens a window without launching an agent.
+This lets each project choose its own swarm shape instead of being locked to a fixed set of roles.
 
-The first window in the config is the cleanup window. SwarmForge attaches shutdown cleanup to that window's launch command and falls back to that tmux session when Terminal automation is unavailable.
+The first window in the config is the cleanup window. SwarmForge attaches shutdown cleanup to that window's launch command and falls back to that tmux session when no trackable terminal backend is available.
 
-When SwarmForge opens Terminal windows, it also starts a small window watchdog:
+When SwarmForge opens trackable terminal windows or tabs, it also starts a small window watchdog:
 
-- Closing a non-cleanup Terminal window reopens that window attached to the same tmux session.
-- Closing the cleanup Terminal window shuts down all configured tmux sessions and closes the remaining tracked Terminal windows.
+- Closing a non-cleanup terminal surface reopens that surface attached to the same tmux session.
+- Closing the cleanup terminal surface shuts down all configured tmux sessions and closes the remaining tracked surfaces.
 - The watchdog updates `.swarmforge/window-ids` when it reopens a window so shutdown cleanup still targets the current windows.
+
+## tmux Behavior
+
+SwarmForge uses a project-specific tmux socket recorded in `.swarmforge/tmux-socket`, so each project swarm is isolated from other tmux sessions. It also honors tmux `base-index` and `pane-base-index` settings when launching agents and sending notifications, so configurations that number windows or panes from `1` work without requiring users to change their tmux preferences.
+
+## Terminal Behavior
+
+SwarmForge opens trackable terminal windows or tabs through a small terminal backend adapter.
+
+Default detection:
+
+- If AppleScript is available, SwarmForge opens macOS Terminal.app windows.
+- Otherwise, if `wt.exe` is available, SwarmForge opens Windows Terminal windows.
+- Otherwise, SwarmForge attaches the cleanup tmux session in the current shell.
+
+Set `SWARMFORGE_TERMINAL` to override detection:
+
+```sh
+SWARMFORGE_TERMINAL=ghostty ./swarm
+SWARMFORGE_TERMINAL=terminal-app ./swarm
+SWARMFORGE_TERMINAL=windows-terminal ./swarm
+SWARMFORGE_TERMINAL=none ./swarm
+```
+
+Use `ghostty` when you want SwarmForge to open Ghostty tabs instead of the default Terminal.app windows.
+Use `windows-terminal` when you want SwarmForge to open Windows Terminal windows from WSL.
+Use `none` when you want SwarmForge to skip terminal automation and attach the cleanup tmux session in the current shell.
+
+### Adding A Terminal Backend
+
+Terminal backends live in `terminal-adapters/`. To add a new backend, create one file named after the backend:
+
+```text
+terminal-adapters/wezterm.sh
+```
+
+The file must define this small contract:
+
+```sh
+terminal_backend_label() {
+  echo "WezTerm"
+}
+
+terminal_backend_can_open_sessions() {
+  return 0
+}
+
+terminal_backend_tracks_windows() {
+  return 0
+}
+
+terminal_open_session() {
+  local session="$1"
+  local title="$2"
+  local sibling_id="${3:-}"
+
+  # Open a terminal surface that runs:
+  # cd "$WORKING_DIR" && exec tmux -S "$TMUX_SOCKET" attach-session -t "$session"
+  #
+  # Print a stable window/tab id to stdout.
+}
+
+terminal_window_exists() {
+  local window_id="$1"
+
+  # Return 0 if the id from terminal_open_session still exists.
+  # Return nonzero otherwise.
+}
+
+terminal_close_window() {
+  local window_id="$1"
+
+  # Close the id from terminal_open_session.
+}
+```
+
+Then run SwarmForge with the backend name:
+
+```sh
+SWARMFORGE_TERMINAL=wezterm ./swarm
+```
+
+If the terminal can open sessions but cannot return stable ids for open/check/close, keep `terminal_backend_can_open_sessions` as `return 0` and set `terminal_backend_tracks_windows` to `return 1`. SwarmForge will open one surface per session and skip the watchdog for that backend. `terminal-adapters/windows-terminal.sh` is an example of this launch-only style.
+
+If the backend cannot open sessions at all, set both capability functions to `return 1`; SwarmForge will attach the cleanup tmux session in the current shell. Only edit `swarm-terminal-adapter.sh` when adding aliases or changing default auto-detection.
 
 Example config:
 
@@ -110,8 +193,6 @@ window coder codex coder
 window refactorer codex refactorer
 window architect codex architect
 ```
-
-`logger` is a utility role. When configured with `none`, it tails `logs/agent_messages.log`.
 
 In the example above, the agents run in these worktrees:
 
