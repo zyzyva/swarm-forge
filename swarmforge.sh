@@ -16,13 +16,21 @@ WORKING_DIR="$(cd "$WORKING_DIR" && pwd)"
 # swarms can run in parallel without colliding. Override with
 # SWARMFORGE_PREFIX=myname if you need a custom name.
 SESSION_PREFIX="${SWARMFORGE_PREFIX:-swarmforge-$(basename "$WORKING_DIR")}"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve through symlinks so SCRIPT_DIR is the real repo dir even when this
+# script is invoked via a symlink on PATH (e.g. ~/bin/swarmforge). The zsh
+# :A modifier canonicalizes to an absolute, symlink-resolved path; :h is dirname.
+SCRIPT_DIR="${0:A:h}"
 SWARM_FORGE_DIR="$WORKING_DIR/swarmforge"
 SWARM_TOOLS_DIR="$WORKING_DIR/swarmtools"
 WORKTREES_DIR="$WORKING_DIR/.worktrees"
 CONFIG_FILE="$SWARM_FORGE_DIR/swarmforge.conf"
 ROLES_DIR="$SWARM_FORGE_DIR"
 CONSTITUTION_FILE="$SWARM_FORGE_DIR/constitution.prompt"
+# Optional per-project overrides. A project may set SWARMFORGE_* vars (model,
+# effort, prefix, etc.) in swarmforge/swarmforge.env to override the shared
+# defaults below without editing this script or the shell rc. Sourced early so
+# the values are in scope when per-role effort/model are resolved at launch.
+[[ -f "$SWARM_FORGE_DIR/swarmforge.env" ]] && source "$SWARM_FORGE_DIR/swarmforge.env"
 STATE_DIR="$WORKING_DIR/.swarmforge"
 WINDOW_IDS_FILE="$STATE_DIR/window-ids"
 WINDOW_STATE_FILE="$STATE_DIR/windows.tsv"
@@ -620,13 +628,13 @@ launch_role() {
   local agent_model
   case "$role" in
     architect|architect-*)
-      agent_model="${SWARMFORGE_ARCHITECT_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-7}}"
+      agent_model="${SWARMFORGE_ARCHITECT_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-8}}"
       ;;
     coder|coder-*)
-      agent_model="${SWARMFORGE_CODER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-7}}"
+      agent_model="${SWARMFORGE_CODER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-8}}"
       ;;
     reviewer|reviewer-*)
-      agent_model="${SWARMFORGE_REVIEWER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-7}}"
+      agent_model="${SWARMFORGE_REVIEWER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-8}}"
       ;;
     *)
       agent_model="${SWARMFORGE_MODEL:-}"
