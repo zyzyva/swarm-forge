@@ -613,7 +613,14 @@ launch_role() {
       agent_effort="${SWARMFORGE_REVIEWER_EFFORT:-${SWARMFORGE_EFFORT:-xhigh}}"
       ;;
     *)
-      agent_effort="${SWARMFORGE_EFFORT:-high}"
+      # Per-role effort for roles beyond the legacy three. Reads
+      # SWARMFORGE_<ROLE>_EFFORT (role uppercased, non-alphanumerics -> _) so
+      # six-pack roles (specifier, cleaner, hardener, QA) can be pinned from
+      # swarmforge/swarmforge.env. Falls back to shared SWARMFORGE_EFFORT, then high.
+      local role_key="${${role:u}//[^A-Z0-9]/_}"
+      local role_effort_var="SWARMFORGE_${role_key}_EFFORT"
+      local role_effort_override="${(P)role_effort_var:-}"
+      agent_effort="${role_effort_override:-${SWARMFORGE_EFFORT:-high}}"
       ;;
   esac
 
