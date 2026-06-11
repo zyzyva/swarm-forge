@@ -6,6 +6,7 @@
   - Clojure: install with Clojure CLI/deps.edn; mutation `github.com/unclebob/clj-mutate`, CRAP `github.com/unclebob/crap4clj`, DRY `github.com/unclebob/dry4clj`.
   - Java: install with Maven (`mvn`); mutation `github.com/unclebob/mutate4java`, CRAP `github.com/unclebob/crap4java`, DRY `github.com/unclebob/dry4java`.
 - Work in small, reviewable increments.
+- Scale specification precision and slice size to the implementer's capability tier. When the implementer runs on a cost-optimized model, write smaller, independently verifiable slices with exact files, signatures, enumerated edge cases, and explicit out-of-scope; rely less on the implementer inferring intent.
 - Prefer the simplest design that supports the current behavior and leaves clear options for the next step.
 - Keep tests close to the behavior being changed.
 - Separate testable modules from environmentally unsuitable modules that open GUIs, depend on external devices, throw environment errors, emit system errors, or hang under automated tests. Maximize testable code and minimize the unsuitable boundary.

@@ -533,6 +533,21 @@ create_role_session() {
   tmux -S "$TMUX_SOCKET" set-window-option -t "$session:$title" allow-rename off
 }
 
+# True when any coder role resolves to a custom base URL this run, mirroring
+# the per-role resolution in launch_role: SWARMFORGE_<ROLE>_BASE_URL (role
+# uppercased, non-alphanumerics -> _, so coder-2 reads
+# SWARMFORGE_CODER_2_BASE_URL) with SWARMFORGE_BASE_URL as the shared fallback.
+coder_base_url_override_set() {
+  local r role_key role_base_url_var
+  for r in "${ROLES[@]}"; do
+    [[ "$r" == coder || "$r" == coder-* ]] || continue
+    role_key="${${r:u}//[^A-Z0-9]/_}"
+    role_base_url_var="SWARMFORGE_${role_key}_BASE_URL"
+    [[ -n "${(P)role_base_url_var:-${SWARMFORGE_BASE_URL:-}}" ]] && return 0
+  done
+  return 1
+}
+
 write_agent_instruction_file() {
   local role="$1"
   local prompt_file="$2"
@@ -554,6 +569,18 @@ EOF
 Read swarmforge/constitution.prompt, then read every file it refers to recursively, and obey all of those instructions.
 Read swarmforge/${role}.prompt, then read every file it refers to recursively, and follow all of those instructions.
 EOF
+  fi
+
+  # When the coder is routed to a cost-optimized / non-Anthropic model this run,
+  # point the roles that define its work (specifier, architect) at the
+  # budget-implementer guidance so they write more prescriptive, smaller slices.
+  # Triggered by SWARMFORGE_BUDGET_IMPLEMENTER=1 or by a base-URL override on
+  # any coder role (per-role or shared). Guarded on file existence so projects
+  # that haven't synced the fragment are unaffected.
+  if [[ "$role" == architect || "$role" == architect-* || "$role" == specifier || "$role" == specifier-* ]] \
+     && [[ -f "$SWARM_FORGE_DIR/budget-implementer.prompt" ]] \
+     && { [[ -n "${SWARMFORGE_BUDGET_IMPLEMENTER:-}" ]] || coder_base_url_override_set; }; then
+    print -r -- "Read swarmforge/budget-implementer.prompt, then follow it when specifying or slicing work for this run." >> "$prompt_file"
   fi
 }
 
@@ -650,6 +677,33 @@ launch_role() {
   local model_flag=""
   [[ -n "$agent_model" ]] && model_flag="--model '$agent_model' "
 
+  # Per-role inference provider. When set, route this role's Claude Code process
+  # at a non-Anthropic, Anthropic-compatible endpoint (e.g. MiniMax's
+  # https://api.minimax.io/anthropic) by exporting ANTHROPIC_BASE_URL /
+  # ANTHROPIC_AUTH_TOKEN into its launch environment. Per-role vars win;
+  # SWARMFORGE_BASE_URL / SWARMFORGE_AUTH_TOKEN are shared fallbacks. Unset means
+  # the role uses the default Anthropic endpoint and your normal credentials.
+  # Pair with the matching SWARMFORGE_<ROLE>_MODEL (e.g. SWARMFORGE_CODER_MODEL=MiniMax-M3).
+  # Only the claude backend consumes these; aider routes providers via its model string.
+  local prov_role_key="${${role:u}//[^A-Z0-9]/_}"
+  local base_url_var="SWARMFORGE_${prov_role_key}_BASE_URL"
+  local auth_token_var="SWARMFORGE_${prov_role_key}_AUTH_TOKEN"
+  local agent_base_url="${(P)base_url_var:-${SWARMFORGE_BASE_URL:-}}"
+  local agent_auth_token="${(P)auth_token_var:-${SWARMFORGE_AUTH_TOKEN:-}}"
+  # The launch command is delivered with tmux send-keys, so anything inlined in
+  # it lands in pane scrollback and the pane shell's history. Write the
+  # overrides (the auth token in particular) to a 600-perm file under the
+  # git-excluded state dir and source it instead.
+  local provider_env=""
+  if [[ -n "$agent_base_url" || -n "$agent_auth_token" ]]; then
+    local provider_env_file="$PROMPTS_DIR/${role}.provider.env"
+    : > "$provider_env_file"
+    chmod 600 "$provider_env_file"
+    [[ -n "$agent_base_url" ]] && print -r -- "export ANTHROPIC_BASE_URL='$agent_base_url'" >> "$provider_env_file"
+    [[ -n "$agent_auth_token" ]] && print -r -- "export ANTHROPIC_AUTH_TOKEN='$agent_auth_token'" >> "$provider_env_file"
+    provider_env="source '$provider_env_file' && "
+  fi
+
   # Permission mode for the claude CLI. Defaults to auto so the swarm can
   # make progress without permission prompts. Override with
   # SWARMFORGE_PERMISSION_MODE (values: default, plan, acceptEdits, auto,
@@ -658,7 +712,12 @@ launch_role() {
 
   case "$agent" in
     claude)
-      launch_cmd="export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && export CLAUDE_CODE_EFFORT_LEVEL='$agent_effort' && cd '$role_worktree' && claude ${model_flag}--append-system-prompt-file '$prompt_file' --permission-mode '$agent_permission' -n 'SwarmForge ${display}' \"\$(cat '$prompt_file')\""
+      # CLAUDE_CODE_EFFORT_LEVEL is an Anthropic-only concept. When this role is
+      # routed to a non-Anthropic endpoint (provider_env set), skip the effort
+      # export so providers like MiniMax aren't sent a param they may reject.
+      local effort_env="export CLAUDE_CODE_EFFORT_LEVEL='$agent_effort' && "
+      [[ -n "$agent_base_url" ]] && effort_env=""
+      launch_cmd="export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && ${provider_env}${effort_env}cd '$role_worktree' && claude ${model_flag}--append-system-prompt-file '$prompt_file' --permission-mode '$agent_permission' -n 'SwarmForge ${display}' \"\$(cat '$prompt_file')\""
       ;;
     codex)
       launch_cmd="export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && codex -C '$role_worktree' \"\$(cat '$prompt_file')\""

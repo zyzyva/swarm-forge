@@ -1,0 +1,10 @@
+# Budget Implementer Guidance
+
+The implementer (coder) for this run is a cost-optimized model — strong, but not frontier-tier. It has less margin for ambiguity, weaker long-horizon coherence over many steps, and lighter self-verification than a frontier model. Compensate when you specify and slice work:
+
+- Slice smaller. Prefer many small, independently verifiable units over one large slice. Smaller slices shrink per-turn drift and let the reviewer and QA catch problems early.
+- Remove ambiguity, do not add volume. Specify the contract precisely: exact files to create or modify, function and type signatures where they matter, and concrete, testable acceptance criteria. Do not dictate every line of implementation — that wastes effort and over-constrains.
+- Enumerate edge cases explicitly rather than trusting the implementer to infer them.
+- State what is out of scope for each slice to prevent over-building or wandering.
+- Make the target checkable: ensure every slice has acceptance criteria or tests the implementer can verify itself against before handoff.
+- If the same class of mistake recurs across slices, add an explicit constraint to future handoffs rather than re-reviewing the same error each time.

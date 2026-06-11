@@ -318,6 +318,34 @@ Copy these sections into your project's role prompts when using a less capable m
 - Slash commands like `/compact` and `/clear` are Claude Code features. Use `/reset` in aider to clear its context instead.
 - The sidecar command runner uses `eval` — the deny list blocks known-dangerous patterns but is not a sandbox. For high-security environments, run the swarm in a container.
 
+## Mixed-Model Swarms With The `claude` Backend
+
+The `claude` backend can also run non-Anthropic models, as long as the provider exposes an Anthropic-compatible API (for example MiniMax at `https://api.minimax.io/anthropic`). Route a single role at such an endpoint with per-role env vars:
+
+```sh
+export SWARMFORGE_CODER_BASE_URL="https://api.minimax.io/anthropic"
+export SWARMFORGE_CODER_AUTH_TOKEN="your-provider-key"
+export SWARMFORGE_CODER_MODEL="MiniMax-M3"
+```
+
+`SWARMFORGE_<ROLE>_BASE_URL` / `SWARMFORGE_<ROLE>_AUTH_TOKEN` follow the same naming as the model and effort vars: role uppercased, non-alphanumerics replaced with `_` (so `coder-2` reads `SWARMFORGE_CODER_2_BASE_URL`). `SWARMFORGE_BASE_URL` / `SWARMFORGE_AUTH_TOKEN` are shared fallbacks that route every claude-backend role at once. Roles with no override use the default Anthropic endpoint and your normal credentials.
+
+Notes:
+
+- Always pair a base-URL override with the matching `SWARMFORGE_<ROLE>_MODEL`; otherwise the role asks the provider for an Anthropic model name it likely doesn't serve.
+- Effort levels are an Anthropic-only concept. Roles routed at a custom endpoint skip the `CLAUDE_CODE_EFFORT_LEVEL` export automatically.
+- The auth token is written to a `600`-permission file under the git-excluded `.swarmforge/prompts/` directory and sourced at launch, so it never appears in the tmux pane or shell history.
+- Only the `claude` backend reads these vars. The `aider` backend routes providers through its model string (see above).
+
+### The Budget Implementer Fragment
+
+A cost-optimized coder needs smaller, more prescriptive slices from the roles that define its work. If `swarmforge/budget-implementer.prompt` exists in your project, SwarmForge appends it to the specifier and architect instructions whenever:
+
+- any coder role has a base-URL override (per-role or shared), or
+- `SWARMFORGE_BUDGET_IMPLEMENTER=1` is set — use this to force it when the budget model is reached through the normal Anthropic endpoint (e.g. Haiku) or through the `aider` backend.
+
+Projects without the fragment file are unaffected. See also "Adapting Prompts For Less Capable Models" above for the aider-flavored equivalent.
+
 ## Examples
 
 The repository includes example swarm definitions under `examples/`.
