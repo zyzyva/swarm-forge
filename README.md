@@ -346,6 +346,18 @@ A cost-optimized coder needs smaller, more prescriptive slices from the roles th
 
 Projects without the fragment file are unaffected. See also "Adapting Prompts For Less Capable Models" above for the aider-flavored equivalent.
 
+## The Optional QA Role
+
+`swarmforge/qa.prompt` defines an opt-in QA gate: an agent that black-box tests the running product end to end — real user flows through the real interface, mobile viewports, accessibility, degraded networks, security probing — rather than reviewing source code (that remains the reviewer's job). It reproduces every failure deterministically, files defects to the architect or specifier through the file-based handoff format, and never edits production code.
+
+Enable it by adding a window to `swarmforge/swarmforge.conf`:
+
+```conf
+window qa claude qa architect
+```
+
+QA runs at feature and pre-merge/pre-demo boundaries, not on every micro-slice. Tune it like any other role with `SWARMFORGE_QA_MODEL` and `SWARMFORGE_QA_EFFORT`.
+
 ## Examples
 
 The repository includes example swarm definitions under `examples/`.

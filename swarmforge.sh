@@ -670,6 +670,9 @@ launch_role() {
     reviewer|reviewer-*)
       agent_model="${SWARMFORGE_REVIEWER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-8}}"
       ;;
+    qa|qa-*)
+      agent_model="${SWARMFORGE_QA_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-8}}"
+      ;;
     *)
       agent_model="${SWARMFORGE_MODEL:-}"
       ;;
