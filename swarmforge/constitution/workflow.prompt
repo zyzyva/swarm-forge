@@ -1,19 +1,43 @@
 # Workflow Rules
 
+## Worktree Discipline
 - At startup, discover and remember the branch or worktree assigned to your role.
 - If your assigned worktree is `master`, work in the main project checkout on its current branch; do not expect or create a `.worktrees/<role>` directory for that role.
 - Work only in your assigned branch or worktree.
 - Do not inspect, diff, merge, or base work on another branch unless that branch is specifically named in a handoff or explicit user instruction.
+
+## Temporary Files
 - Use `./tmp/` in your assigned worktree for temporary files; do not use `/tmp`.
+
+## Handoff Helpers
 - Use `./swarmtools/notify-agent.sh` from your assigned checkout or worktree for handoffs between agents. Startup creates this helper locally, using a wrapper in linked worktrees. Do not rely on PATH lookup.
-- For every handoff, write the complete handoff message to `./tmp/<target-role>-handoff.txt` and send it with `./swarmtools/notify-agent.sh <target-role> --file ./tmp/<target-role>-handoff.txt`. Do not pass multiline handoff messages directly as shell arguments.
-- Start every handoff message with: `Re-read your role and constitution.`
+
+## Logbook
+- The handoff helpers maintain a root `logbook.jsonl` file recording every handoff sent, received, or queued.
+- Keep `logbook.jsonl` as append-only JSON Lines. Each line is one complete JSON object; never rewrite, reformat, sort, summarize, or merge existing entries.
+- Each log entry includes `timestamp`, `direction`, `message`, and `note` fields, with `direction` values `received`, `sent`, or `queued`.
+- Do not hand-edit handoff logbook entries unless a helper script fails and explicit user direction says to repair the logbook manually.
+- If a merge conflict occurs in `logbook.jsonl`, keep all complete JSON lines from both sides. Preserve message text exactly; order chronologically when obvious, otherwise keep both groups intact.
+- Commit `logbook.jsonl` updates with the next substantive role-owned commit or outgoing handoff commit. Make a logbook-only commit only when no other work will be committed for that handoff.
+
+## Handoff Format
+- For every outgoing handoff, write only the role-specific handoff body to `./tmp/<target-role>-handoff.txt`, then send it with `./swarmtools/notify-agent.sh send <target-role> --file ./tmp/<target-role>-handoff.txt`. Do not pass multiline handoff messages directly as shell arguments.
+- `notify-agent.sh send` wraps the body with `message type`, `message id`, `sender role`, `target role`, and `message sequence` fields, archives the sent message, appends the sent logbook entry, and sends the message.
+- Start every handoff body with: `Re-read your role and constitution.`
 - The specifier invents a short, stable handoff name for each accepted specification handoff.
 - Every later handoff for that work must include the specifier handoff name.
-- Handoffs must report only essential state, not prescribe process. After the opening line, include exactly these fields and no other prose: sender role, specifier handoff name, branch name, and commit hash.
+- Handoff bodies must report only essential state, not prescribe process. After the opening line, include exactly these fields and no other prose: specifier handoff name, branch name, and 10-character commit hash.
 - Do not tell the receiving role how to do its job, repeat your process, or ask it to continue sender-owned responsibilities. The normal request is: `Apply your own role rules to this state.`
-- After receiving a handoff, merge the sender branch state identified by the handoff branch name and commit hash into your assigned branch before applying your own role rules.
+
+## Receiving Handoffs
+- When receiving any handoff or resend request, save the complete incoming message to `./tmp/incoming-handoff.txt` or another local file, then run `./swarmtools/notify-agent.sh receive --file <saved-message-file>`.
+- Process the handoff only if `notify-agent.sh receive` reports `OK to process` and exits successfully.
+- If `notify-agent.sh receive` reports `DO NOT PROCESS`, do not merge, apply, or otherwise act on that handoff; the helper has detected an out-of-order, duplicate, or stale message and has requested any required resend.
+- If a `resend-request` is received, `notify-agent.sh receive` resends the archived requested messages; no role-specific work is required beyond committing the logbook update when needed.
+- After receiving a handoff, merge the sender branch state identified by the handoff branch name and 10-character commit hash into your assigned branch before applying your own role rules.
 - When receiving a handoff, ignore sender process narrative and decide next actions only from your own role prompt, the constitution, and the current project state.
+
+## Queued Messages
 - If one or more messages arrive while you are busy:
   - Save each complete message as its own file in a local untracked `pending-messages/` directory in your assigned worktree.
   - Name queued message files with this format: `PP-YYYYMMDD-HHMMSS-source.txt`, where `PP` is the two-digit priority.
@@ -21,5 +45,8 @@
   - Use priority `50` for normal messages unless a role prompt or explicit user instruction sets a different priority.
   - Finish the current job before acting on queued messages.
   - After the current job is complete and any required handoff has been sent, process queued message files in sorted filename order.
+  - Before acting on any queued handoff, run `./swarmtools/notify-agent.sh receive --file <queued-message-file>` so the helper validates the sequence and records the logbook entry; process it only on `OK to process`.
   - Delete each queued message file only after processing it. Do not use `rm -f`; use a non-forced deletion command so queue cleanup does not trigger escalation.
+
+## Failure Conditions
 - If the expected git layout or assigned worktree is missing, stop and report instead of silently working in the wrong place.
