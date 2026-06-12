@@ -68,9 +68,9 @@ The default three-agent workflow is:
 5. Run `swarmforge.sh <working-directory>` or run it from inside that directory.
 6. If the working directory is not already a git repo, startup runs `git init`, renames the initial branch to `master`, writes `.gitignore` entries for `.swarmforge/`, `.worktrees/`, `swarmtools/`, `logs/`, and `agent_context/`, and makes the first commit from the current project state.
 7. Startup creates a git worktree for each window under `.worktrees/<worktree>`, unless the worktree field is `none` or `master`.
-8. Startup creates `swarmtools/notify-agent.sh` for that project.
+8. Startup creates `swarmtools/notify-agent.sh` for that project and installs the sequenced handoff helpers next to it.
 9. SwarmForge creates tmux sessions, opens Terminal windows, and launches each configured backend in its assigned worktree.
-10. Roles communicate through helper commands such as `notify-agent.sh <role> --file <message-file>`.
+10. Roles communicate through sequenced handoffs: `notify-agent.sh send` assigns message ids and sequence numbers, archives sent messages, records logbook entries, and delivers the message; `notify-agent.sh receive` validates ordering and requests resends when gaps are detected.
 
 ## The `swarmforge.conf` File
 
@@ -99,6 +99,44 @@ When SwarmForge opens trackable terminal windows or tabs, it also starts a small
 - Closing a non-cleanup terminal surface reopens that surface attached to the same tmux session.
 - Closing the cleanup terminal surface shuts down all configured tmux sessions and closes the remaining tracked surfaces.
 - The watchdog updates `.swarmforge/window-ids` when it reopens a window so shutdown cleanup still targets the current windows.
+
+## Sequenced Handoffs
+
+Agents communicate through sequenced handoff files so a dropped or garbled tmux message cannot silently stall the swarm.
+
+To send a handoff, an agent writes the role-specific body to a file and runs:
+
+```sh
+./swarmtools/notify-agent.sh send <target-role> --file ./tmp/<target-role>-handoff.txt
+```
+
+The helper wraps the body with protocol fields before delivery:
+
+```text
+message type: handoff
+message id: handoff-YYYYMMDD-HHMMSS-sender-target-NNNNNN-XXXXXX
+sender role: sender
+target role: target
+message sequence: NNNNNN
+```
+
+Sequence numbers are per sender-target stream. Sent messages are archived in the sender's worktree under `.swarmforge/handoffs/sent/` so they can be replayed later, and every send, receive, and queued decision is appended to a `logbook.jsonl` file at the worktree root.
+
+When an agent receives a handoff, it saves the complete incoming message to a file and runs:
+
+```sh
+./swarmtools/notify-agent.sh receive --file ./tmp/incoming-handoff.txt
+```
+
+If the sequence is exactly one greater than the last processed message from that sender, the helper records the message and reports `OK to process`. If there is a gap, the helper archives the out-of-order message, records a queued logbook entry, sends a `resend-request` to the sender for the missing range, and tells the agent not to process it. The sender's `receive` handles a `resend-request` by replaying the archived messages automatically.
+
+Sender and receiver roles default from the `SWARMFORGE_ROLE` environment variable, which SwarmForge exports into every agent's launch environment; the helpers also accept explicit `--sender`/`--receiver` flags.
+
+The low-level transport form remains available for plain messages that intentionally bypass sequencing (such as `/compact` nudges) and for the helper implementation itself:
+
+```sh
+./swarmtools/notify-agent.sh <target-role-or-index> --file <message-file>
+```
 
 ## tmux Behavior
 
@@ -284,7 +322,7 @@ export SWARMFORGE_AIDER_FLAGS="--auto-test --test-cmd 'go test ./...'"
 
 Aider cannot run shell commands, call `notify-agent.sh`, or execute `git merge`. SwarmForge starts a **sidecar process** alongside every aider agent to bridge this gap. The sidecar handles three things:
 
-**Commit watcher** — polls the worktree for new commits and sends a handoff notification to the role specified in the 5th config field. The architect and reviewer hear from the coder automatically.
+**Commit watcher** — polls the worktree for new commits and sends a sequenced handoff (via `notify-agent.sh send`) to the role specified in the 5th config field. The architect and reviewer hear from the coder automatically, with sequence numbers and logbook entries like any other handoff.
 
 **Merge handler** — when another agent calls `notify-agent.sh --merge <branch> coder "message"`, the script writes a merge operation to `.swarmforge/ops/<role>.queue`. The sidecar picks it up and executes `git merge` in the aider worktree. If the merge fails, it aborts and notifies aider of the conflict.
 
@@ -301,6 +339,8 @@ notify-agent.sh --merge swarmforge-architect coder "Review your rules. Merge fro
 ```
 
 For `claude` and `codex` targets, `--merge` is ignored (the agent handles merges itself). For `aider` targets, the merge is routed to the sidecar. The text message is still sent to aider for context either way.
+
+Note that `--merge` uses the low-level transport form, which bypasses sequencing. That is acceptable for aider targets because aider reads message text directly and does not run receive-side validation.
 
 ### Adapting Prompts For Less Capable Models
 
