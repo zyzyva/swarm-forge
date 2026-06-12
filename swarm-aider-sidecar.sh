@@ -43,13 +43,18 @@ check_commits() {
 
   local branch short_hash commit_msg
   branch="$(git -C "$WORKTREE_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")"
-  short_hash="${current_hash:0:8}"
+  short_hash="${current_hash:0:10}"
   commit_msg="$(git -C "$WORKTREE_PATH" log --format='%s' -1 2>/dev/null || echo "unknown")"
 
   log "Commit detected on $branch ($short_hash): $commit_msg"
-  "$NOTIFY_SCRIPT" "$NOTIFY_TARGET" \
-    "Review your rules. ${ROLE} committed on branch ${branch} (${short_hash}): ${commit_msg}" \
-    2>/dev/null || log "Failed to notify $NOTIFY_TARGET"
+  # Send as a sequenced handoff (cwd = worktree so handoff state and the
+  # logbook land there); receivers refuse un-sequenced protocol-less messages.
+  local handoff_body
+  handoff_body="$(mktemp "$WORKTREE_PATH/.sidecar/commit-handoff.XXXXXX")"
+  printf '%s\n' "Re-read your role and constitution. ${ROLE} committed on branch ${branch} (${short_hash}): ${commit_msg}" > "$handoff_body"
+  (cd "$WORKTREE_PATH" && "$NOTIFY_SCRIPT" send "$NOTIFY_TARGET" --file "$handoff_body" --sender "$ROLE") \
+    >> "$SIDECAR_LOG" 2>&1 || log "Failed to notify $NOTIFY_TARGET"
+  rm "$handoff_body"
 
   LAST_HASH="$current_hash"
 }
