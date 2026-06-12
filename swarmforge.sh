@@ -333,7 +333,7 @@ write_sessions_file() {
 
 check_helper_scripts() {
   local helper
-  for helper in swarm-cleanup.sh swarm-window-watchdog.sh swarm-terminal-adapter.sh swarmlog.sh swarm-aider-sidecar.sh; do
+  for helper in swarm-cleanup.sh swarm-window-watchdog.sh swarm-terminal-adapter.sh swarmlog.sh swarm-aider-sidecar.sh handoff-lib.sh send-handoff.sh receive-handoff.sh resend-handoff.sh; do
     if [[ ! -x "$SCRIPT_DIR/$helper" ]]; then
       echo -e "${RED}Error:${RESET} Required helper script not found or not executable: $SCRIPT_DIR/$helper"
       exit 1
@@ -354,6 +354,25 @@ write_notify_script() {
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Sequenced handoff subcommands. The handoff scripts are installed next to
+# this script at swarm startup; dispatch by explicit path, not PATH lookup.
+if [[ $# -gt 0 ]]; then
+  case "$1" in
+    send)
+      shift
+      exec "$SCRIPT_DIR/send-handoff.sh" "$@"
+      ;;
+    receive)
+      shift
+      exec "$SCRIPT_DIR/receive-handoff.sh" "$@"
+      ;;
+    resend)
+      shift
+      exec "$SCRIPT_DIR/resend-handoff.sh" "$@"
+      ;;
+  esac
+fi
 
 find_project_dir() {
   local git_common_dir
@@ -468,12 +487,21 @@ EOF
   chmod +x "$SWARM_TOOLS_DIR/notify-agent.sh"
 }
 
+install_handoff_scripts() {
+  local helper
+  for helper in handoff-lib.sh send-handoff.sh receive-handoff.sh resend-handoff.sh; do
+    cp "$SCRIPT_DIR/$helper" "$SWARM_TOOLS_DIR/$helper"
+    chmod +x "$SWARM_TOOLS_DIR/$helper"
+  done
+}
+
 prepare_workspace() {
   mkdir -p "$WORKING_DIR/logs" "$WORKING_DIR/agent_context" "$STATE_DIR" "$PROMPTS_DIR" "$SWARM_TOOLS_DIR" "$WORKTREES_DIR" "$TMUX_SOCKET_DIR" "$STATE_DIR/ops"
   printf '%s\n' "$TMUX_SOCKET" > "$TMUX_SOCKET_FILE"
   check_helper_scripts
   write_sessions_file
   write_notify_script
+  install_handoff_scripts
 }
 
 write_worktree_notify_wrapper() {
@@ -720,22 +748,22 @@ launch_role() {
       # export so providers like MiniMax aren't sent a param they may reject.
       local effort_env="export CLAUDE_CODE_EFFORT_LEVEL='$agent_effort' && "
       [[ -n "$agent_base_url" ]] && effort_env=""
-      launch_cmd="export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && ${provider_env}${effort_env}cd '$role_worktree' && claude ${model_flag}--append-system-prompt-file '$prompt_file' --permission-mode '$agent_permission' -n 'SwarmForge ${display}' \"\$(cat '$prompt_file')\""
+      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && ${provider_env}${effort_env}cd '$role_worktree' && claude ${model_flag}--append-system-prompt-file '$prompt_file' --permission-mode '$agent_permission' -n 'SwarmForge ${display}' \"\$(cat '$prompt_file')\""
       ;;
     codex)
-      launch_cmd="export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && codex -C '$role_worktree' \"\$(cat '$prompt_file')\""
+      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && codex -C '$role_worktree' \"\$(cat '$prompt_file')\""
       ;;
     aider)
       local aider_flags="${SWARMFORGE_AIDER_FLAGS:-}"
       local notify_target="${NOTIFY_TARGETS[$index]}"
       local sidecar_cmd="'$SCRIPT_DIR/swarm-aider-sidecar.sh' '$role_worktree' '$role' '$WORKING_DIR' '$session' '$notify_target' &"
-      launch_cmd="export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && $sidecar_cmd aider ${model_flag}--yes-always --read '$SWARM_FORGE_DIR/constitution.prompt' --read '$SWARM_FORGE_DIR/${role}.prompt' --read '$prompt_file' $aider_flags --message \"\$(cat '$prompt_file')\""
+      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && $sidecar_cmd aider ${model_flag}--yes-always --read '$SWARM_FORGE_DIR/constitution.prompt' --read '$SWARM_FORGE_DIR/${role}.prompt' --read '$prompt_file' $aider_flags --message \"\$(cat '$prompt_file')\""
       ;;
     copilot)
-      launch_cmd="export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && copilot -C '$role_worktree' --name 'SwarmForge ${display}' -i \"\$(cat '$prompt_file')\""
+      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && copilot -C '$role_worktree' --name 'SwarmForge ${display}' -i \"\$(cat '$prompt_file')\""
       ;;
     grok)
-      launch_cmd="export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && grok --cwd '$role_worktree' --permission-mode acceptEdits --rules \"\$(cat '$prompt_file')\""
+      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && grok --cwd '$role_worktree' --permission-mode acceptEdits --rules \"\$(cat '$prompt_file')\""
       ;;
   esac
 
@@ -808,7 +836,7 @@ for (( i = 1; i <= ${#ROLES[@]}; i++ )); do
   echo -e "  ${DISPLAY_NAMES[$i]}: ${SESSIONS[$i]}"
 done
 echo ""
-echo -e "${GREEN}Tip: Use $WORKING_DIR/swarmtools/notify-agent.sh <role-or-index> --file <message-file> while the swarm is running.${RESET}"
+echo -e "${GREEN}Tip: Use $WORKING_DIR/swarmtools/notify-agent.sh send <role> --file <body-file> while the swarm is running.${RESET}"
 echo -e "${GREEN}Tip: Reattach manually with 'tmux -S $TMUX_SOCKET attach-session -t <session-name>' if needed.${RESET}"
 echo ""
 
