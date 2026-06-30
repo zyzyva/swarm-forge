@@ -192,6 +192,15 @@ remove_nonessential_clone_files() {
     return
   fi
 
+  # Only strip swarm-forge's OWN template files. They are present only when a new
+  # project was scaffolded from the swarm-forge clone (marked by SwarmForgeInitSpec.md).
+  # An ADOPTED existing repo has its own real README.md / examples and no init spec —
+  # never delete those. Blindly rm'ing README.md destroyed real project READMEs on the
+  # first swarm launch of an existing repo (e.g. seo_kit).
+  if [[ ! -f "$WORKING_DIR/SwarmForgeInitSpec.md" ]]; then
+    return
+  fi
+
   rm -rf "$WORKING_DIR/README.md" "$WORKING_DIR/SwarmForgeInitSpec.md" "$WORKING_DIR/examples"
 }
 
