@@ -668,7 +668,7 @@ launch_role() {
   local agent_effort
   case "$role" in
     architect|architect-*)
-      agent_effort="${SWARMFORGE_ARCHITECT_EFFORT:-${SWARMFORGE_EFFORT:-max}}"
+      agent_effort="${SWARMFORGE_ARCHITECT_EFFORT:-${SWARMFORGE_EFFORT:-xhigh}}"
       ;;
     coder|coder-*)
       agent_effort="${SWARMFORGE_CODER_EFFORT:-${SWARMFORGE_EFFORT:-xhigh}}"
@@ -688,8 +688,9 @@ launch_role() {
       ;;
   esac
 
-  # Pick the model per role. Opus is the default for every role. For
-  # claude and codex backends this selects an Anthropic model; for aider
+  # Pick the model per role. Opus is the default for most roles; the
+  # architect defaults to Fable 5 (frontier planning). For claude and
+  # codex backends this selects an Anthropic model; for aider
   # it can be any provider/model string that aider supports
   # (e.g. fireworks_ai/accounts/fireworks/models/kimi-k2-6). Per-role
   # env vars win; SWARMFORGE_MODEL is a shared fallback. Empty string
@@ -699,7 +700,7 @@ launch_role() {
   local agent_model
   case "$role" in
     architect|architect-*)
-      agent_model="${SWARMFORGE_ARCHITECT_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-8}}"
+      agent_model="${SWARMFORGE_ARCHITECT_MODEL:-${SWARMFORGE_MODEL:-claude-fable-5}}"
       ;;
     coder|coder-*)
       agent_model="${SWARMFORGE_CODER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-8}}"
@@ -711,7 +712,13 @@ launch_role() {
       agent_model="${SWARMFORGE_QA_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-8}}"
       ;;
     *)
-      agent_model="${SWARMFORGE_MODEL:-}"
+      # Per-role model for roles beyond the legacy four, mirroring the effort
+      # lookup: SWARMFORGE_<ROLE>_MODEL (role uppercased, non-alphanumerics -> _,
+      # so resilience reads SWARMFORGE_RESILIENCE_MODEL). Falls back to shared
+      # SWARMFORGE_MODEL; empty means the backend inherits its own default.
+      local model_role_key="${${role:u}//[^A-Z0-9]/_}"
+      local role_model_var="SWARMFORGE_${model_role_key}_MODEL"
+      agent_model="${(P)role_model_var:-${SWARMFORGE_MODEL:-}}"
       ;;
   esac
   local model_flag=""
@@ -819,6 +826,13 @@ for local_session in "${SESSIONS[@]}"; do
     tmux -S "$TMUX_SOCKET" kill-session -t "$local_session"
   fi
 done
+
+# Optional adapter hook: lets a backend retire leftovers from a previous
+# launch (e.g. the tiled backend's viewer session and its GUI window) before
+# new sessions open.
+if typeset -f terminal_backend_prelaunch >/dev/null 2>&1; then
+  terminal_backend_prelaunch
+fi
 
 echo -e "${CYAN}${BOLD}"
 echo "  ╔═══════════════════════════════════════════════╗"

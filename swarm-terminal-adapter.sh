@@ -9,6 +9,9 @@ normalize_terminal_backend() {
     terminal|terminal-app|terminal.app)
       echo "terminal-app"
       ;;
+    tiled|one-window|single-window|terminal-app-tiled)
+      echo "terminal-app-tiled"
+      ;;
     windows|windows-terminal|wt)
       echo "windows-terminal"
       ;;
