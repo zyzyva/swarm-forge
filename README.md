@@ -12,6 +12,12 @@ SwarmForge is an agent coordination system that facilitates communication betwee
 
 It provides a shared structure for role-specific prompts, worktree assignment, tmux sessions, and message passing so multiple agents can collaborate on the same project without stepping on each other.
 
+## Upstream Sync Status
+
+This fork tracks [unclebob/swarm-forge](https://github.com/unclebob/swarm-forge). Upstream has since moved to a Babashka-based core: helper scripts live under `swarmforge/scripts/` (`.bb` implementations with `.sh` wrappers), a `handoffd.bb` daemon delivers handoffs (see `swarmforge/handoff-protocol.md`), shared constitution articles live under `swarmforge/constitution/articles/`, and the runnable swarm moved off `main` onto starter branches.
+
+Those upstream files are present in this tree from the last merge but are **not yet used by this fork's launcher**. The operational path here remains the root `swarm` wrapper and shell helpers documented below, with sequenced handoffs via `swarmtools/notify-agent.sh`. Adopting the upstream stack would require installing Babashka (`bb`) on every fleet machine and migrating each project's `swarmforge/` config — a deliberate future step, not something this fork does implicitly.
+
 ## What SwarmForge Does
 
 SwarmForge is a lightweight, tmux-based orchestration layer that:
