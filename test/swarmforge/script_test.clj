@@ -301,3 +301,50 @@
         (is (= "" (:err result))))
       (finally
         (fs/delete-tree root)))))
+
+(defn close-swarm []
+  (str (fs/path repo-root "close-swarm")))
+
+(deftest close-swarm-reports-when-no-swarm-state
+  (let [root (tmp-dir)]
+    (try
+      (let [result (run {:dir root :ok? false
+                         :env {"SWARMFORGE_TERMINAL_BACKEND" "none"}}
+                        (close-swarm)
+                        (str root))]
+        (is (not= 0 (:exit result)))
+        (is (str/includes? (str (:err result) (:out result)) "No SwarmForge swarm")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest close-swarm-kills-tmux-sessions-and-stops-daemon
+  (let [root (tmp-dir)
+        sock (str (fs/path root "swarm.sock"))
+        pid-file (fs/path root ".swarmforge/daemon/handoffd.pid")
+        daemon (.start (java.lang.ProcessBuilder. ["sleep" "120"]))
+        pid (str (.pid daemon))]
+    (try
+      (write-file (fs/path root ".swarmforge/tmux-socket") (str sock "\n"))
+      (write-file (fs/path root ".swarmforge/sessions.tsv")
+                  (str "1\tcoder\tswarmforge-coder\tCoder\tcodex\n"
+                       "2\tcleaner\tswarmforge-cleaner\tCleaner\tcodex\n"))
+      (write-file (fs/path root ".swarmforge/window-ids") "win-a\nwin-b\n")
+      (write-file pid-file (str pid "\n"))
+      (run {:dir root} "tmux" "-S" sock "new-session" "-d" "-s" "swarmforge-coder" "sleep" "120")
+      (run {:dir root} "tmux" "-S" sock "new-session" "-d" "-s" "swarmforge-cleaner" "sleep" "120")
+      (let [result (run {:dir root
+                         :env {"SWARMFORGE_TERMINAL_BACKEND" "none"}}
+                        (close-swarm)
+                        (str root))]
+        (is (= 0 (:exit result)))
+        (is (not= 0 (:exit (run {:dir root :ok? false}
+                                "tmux" "-S" sock "has-session" "-t" "swarmforge-coder"))))
+        (is (not= 0 (:exit (run {:dir root :ok? false}
+                                "tmux" "-S" sock "has-session" "-t" "swarmforge-cleaner"))))
+        (is (not (fs/exists? pid-file)))
+        (is (false? (.isAlive daemon))))
+      (finally
+        (when (.isAlive daemon)
+          (.destroyForcibly daemon))
+        (run {:dir root :ok? false} "tmux" "-S" sock "kill-server")
+        (fs/delete-tree root)))))
