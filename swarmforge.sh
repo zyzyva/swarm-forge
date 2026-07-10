@@ -627,7 +627,18 @@ send_initial_grok_prompt() {
   local prompt_file="$3"
 
   (
-    sleep 3
+    # A fixed sleep raced slow-starting shells: the prompt text got typed
+    # into the still-pending launch command line and corrupted it. Wait for
+    # grok to be the pane's foreground command before typing, with the old
+    # blind send as a timeout fallback.
+    local i
+    for i in {1..60}; do
+      if [[ "$(tmux -S "$TMUX_SOCKET" display-message -p -t "$(tmux_agent_target "$session" "$display")" '#{pane_current_command}' 2>/dev/null)" == "grok" ]]; then
+        break
+      fi
+      sleep 0.5
+    done
+    sleep 1
     tmux -S "$TMUX_SOCKET" send-keys -t "$(tmux_agent_target "$session" "$display")" -l -- "$(< "$prompt_file")"
     sleep 0.15
     tmux -S "$TMUX_SOCKET" send-keys -t "$(tmux_agent_target "$session" "$display")" C-m
@@ -779,7 +790,14 @@ launch_role() {
       launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && copilot -C '$role_worktree' --name 'SwarmForge ${display}' -i \"\$(cat '$prompt_file')\""
       ;;
     grok)
-      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && grok --cwd '$role_worktree' --permission-mode acceptEdits --rules \"\$(cat '$prompt_file')\""
+      # Strip XAI_API_KEY so grok sessions auth via the subscription login
+      # (~/.grok) and can never bill the API key the shell happens to export.
+      # Set SWARMFORGE_GROK_USE_API_KEY=1 to keep the key in the session env.
+      local grok_env="env -u XAI_API_KEY "
+      if [[ "${SWARMFORGE_GROK_USE_API_KEY:-0}" == "1" ]]; then
+        grok_env=""
+      fi
+      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && ${grok_env}grok --cwd '$role_worktree' --permission-mode acceptEdits --rules \"\$(cat '$prompt_file')\""
       ;;
   esac
 
@@ -793,7 +811,15 @@ launch_role() {
     launch_cmd+=" >/dev/null 2>&1 &!; exit \$exit_code"
   fi
 
-  tmux -S "$TMUX_SOCKET" send-keys -t "$(tmux_agent_target "$session" "$display")" "$launch_cmd" Enter
+  # Never type the full command into the pane: while the shell is still
+  # initializing, typed input sits in the pty's canonical buffer (1024 bytes
+  # on macOS) and anything past that is silently dropped, truncating long
+  # launch commands. Write the command to a file and type a short source
+  # line instead; sourcing keeps the exact semantics of typing it (the
+  # cleanup owner's trailing `exit` still closes the shell).
+  local launch_file="$PROMPTS_DIR/${role}.launch.zsh"
+  print -r -- "$launch_cmd" > "$launch_file"
+  tmux -S "$TMUX_SOCKET" send-keys -t "$(tmux_agent_target "$session" "$display")" "source '$launch_file'" Enter
   if [[ "$agent" == "grok" ]]; then
     send_initial_grok_prompt "$session" "$display" "$prompt_file"
   fi
@@ -893,6 +919,8 @@ if terminal_backend_can_open_sessions; then
   else
     echo -e "${YELLOW}$(terminal_backend_label) surfaces are not trackable; window watchdog is disabled for this backend.${RESET}"
   fi
+elif [[ "${SWARMFORGE_ATTACH:-1}" == "0" ]]; then
+  echo -e "Running detached (SWARMFORGE_ATTACH=0). Attach a session with: swarm-attach <role>"
 else
   echo -e "${YELLOW}No terminal backend found; attaching current shell to '${SESSIONS[$CLEANUP_OWNER_INDEX]}' instead.${RESET}"
   tmux -S "$TMUX_SOCKET" attach-session -t "${SESSIONS[$CLEANUP_OWNER_INDEX]}"
