@@ -893,6 +893,8 @@ if terminal_backend_can_open_sessions; then
   else
     echo -e "${YELLOW}$(terminal_backend_label) surfaces are not trackable; window watchdog is disabled for this backend.${RESET}"
   fi
+elif [[ "${SWARMFORGE_ATTACH:-1}" == "0" ]]; then
+  echo -e "Running detached (SWARMFORGE_ATTACH=0). Attach a session with: swarm-attach <role>"
 else
   echo -e "${YELLOW}No terminal backend found; attaching current shell to '${SESSIONS[$CLEANUP_OWNER_INDEX]}' instead.${RESET}"
   tmux -S "$TMUX_SOCKET" attach-session -t "${SESSIONS[$CLEANUP_OWNER_INDEX]}"

@@ -53,4 +53,11 @@ TARGET_SESSION="$(resolve_session "$1")" || {
   exit 1
 }
 
+# The swarm's tmux server runs on a project-specific socket, recorded at
+# startup; without -S this would look at the default server and find nothing.
+TMUX_SOCKET_FILE="$PROJECT_DIR/.swarmforge/tmux-socket"
+if [[ -f "$TMUX_SOCKET_FILE" ]]; then
+  exec tmux -S "$(< "$TMUX_SOCKET_FILE")" attach-session -t "$TARGET_SESSION"
+fi
+
 exec tmux attach-session -t "$TARGET_SESSION"
