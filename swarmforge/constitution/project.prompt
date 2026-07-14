@@ -1,6 +1,6 @@
 # Project Rules
 
-- This project is configured for SwarmForge with four Codex-backed agents: specifier, coder, refactorer, and architect.
+- This project is configured for SwarmForge with four agents: specifier, coder, refactorer, and architect. Coder runs on grok; the rest run on claude.
 - Project language: Go.
 - Preserve project-local SwarmForge configuration under `swarmforge/`.
 - Keep swarm state local under `.swarmforge/`, worktrees under `.worktrees/`, helper scripts under `swarmtools/`, logs under `logs/`, and shared agent context under `agent_context/`.

@@ -232,10 +232,10 @@ If the backend cannot open sessions at all, set both capability functions to `re
 Example config:
 
 ```conf
-window coordinator codex master
-window coder codex coder
-window refactorer codex refactorer
-window architect codex architect
+window coordinator claude master
+window coder       grok   coder
+window refactorer  claude refactorer
+window architect   claude architect
 ```
 
 In the example above, the agents run in these worktrees:
