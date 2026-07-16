@@ -671,9 +671,9 @@ launch_role() {
   # Pin the Claude Code effort level per role so each agent runs at an
   # appropriate reasoning budget regardless of shell or tmux env
   # inheritance. Per-role env vars win; SWARMFORGE_EFFORT is a shared
-  # fallback. All roles default to xhigh because every role now runs on
-  # Opus, which honors xhigh and benefits from it. Override per-role with
-  # SWARMFORGE_<ROLE>_EFFORT (e.g. SWARMFORGE_CODER_EFFORT=high).
+  # fallback. All roles default to xhigh; the frontier roles (Opus reviewer/QA,
+  # Fable architect) and the Sonnet coder all honor xhigh and benefit from it.
+  # Override per-role with SWARMFORGE_<ROLE>_EFFORT (e.g. SWARMFORGE_CODER_EFFORT=high).
   # Effort levels are a Claude Code concept and do not apply to the aider
   # backend.
   local agent_effort
@@ -705,16 +705,16 @@ launch_role() {
   # it can be any provider/model string that aider supports
   # (e.g. fireworks_ai/accounts/fireworks/models/kimi-k2-6). Per-role
   # env vars win; SWARMFORGE_MODEL is a shared fallback. Empty string
-  # means "let the backend inherit its own default". Override the coder
-  # back to Sonnet with SWARMFORGE_CODER_MODEL=claude-sonnet-4-6 if cost
-  # becomes the constraint again.
+  # means "let the backend inherit its own default". The coder defaults to
+  # Sonnet for cost; override it back to Opus with
+  # SWARMFORGE_CODER_MODEL=claude-opus-4-8 when a run needs frontier coding.
   local agent_model
   case "$role" in
     architect|architect-*)
       agent_model="${SWARMFORGE_ARCHITECT_MODEL:-${SWARMFORGE_MODEL:-claude-fable-5}}"
       ;;
     coder|coder-*)
-      agent_model="${SWARMFORGE_CODER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-8}}"
+      agent_model="${SWARMFORGE_CODER_MODEL:-${SWARMFORGE_MODEL:-claude-sonnet-5}}"
       ;;
     reviewer|reviewer-*)
       agent_model="${SWARMFORGE_REVIEWER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-8}}"
