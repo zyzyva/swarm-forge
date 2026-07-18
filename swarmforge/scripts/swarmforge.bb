@@ -307,18 +307,15 @@
   (let [args (:extra-args row)]
     (if (str/blank? args) "" (str args " "))))
 
-(defn grok-wants-auto-approve? [row]
-  (when-let [args (:extra-args row)]
-    (or (str/includes? args "--always-approve")
-        (str/includes? args "--yolo")
-        (re-find #"--permission-mode\s+bypassPermissions" args))))
-
 (defn grok-permission-prefix [row]
-  ;; acceptEdits only auto-approves file edits; bypassPermissions is the
-  ;; CLI-enforced mode that matches --always-approve / --yolo.
-  (if (grok-wants-auto-approve? row)
-    "--permission-mode bypassPermissions "
-    "--permission-mode acceptEdits "))
+  ;; Default always-approve so unattended swarm agents do not block on
+  ;; tool-permission prompts. Opt into a stricter mode via extra-args
+  ;; (e.g. --permission-mode acceptEdits); otherwise force
+  ;; bypassPermissions so a global/project config cannot reintroduce prompts.
+  (if-let [[_ mode] (when-let [args (:extra-args row)]
+                      (re-find #"--permission-mode\s+(\S+)" args))]
+    (str "--permission-mode " mode " ")
+    "--permission-mode bypassPermissions "))
 
 (defn launch-command [ctx index row]
   (let [role (:role row)

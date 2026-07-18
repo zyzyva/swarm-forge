@@ -797,7 +797,14 @@ launch_role() {
       if [[ "${SWARMFORGE_GROK_USE_API_KEY:-0}" == "1" ]]; then
         grok_env=""
       fi
-      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && ${grok_env}grok --cwd '$role_worktree' --permission-mode acceptEdits --rules \"\$(cat '$prompt_file')\""
+      # Always-approve (bypassPermissions) so unattended swarm agents do not
+      # block on tool-permission prompts. Override with
+      # SWARMFORGE_PERMISSION_MODE if you need a stricter mode.
+      local grok_permission="${SWARMFORGE_PERMISSION_MODE:-bypassPermissions}"
+      case "$grok_permission" in
+        always-approve|yolo) grok_permission="bypassPermissions" ;;
+      esac
+      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && ${grok_env}grok --cwd '$role_worktree' --permission-mode '$grok_permission' --rules \"\$(cat '$prompt_file')\""
       ;;
   esac
 
