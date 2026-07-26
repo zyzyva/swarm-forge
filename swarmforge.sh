@@ -771,6 +771,29 @@ launch_role() {
   # bypassPermissions, dontAsk).
   local agent_permission="${SWARMFORGE_PERMISSION_MODE:-auto}"
 
+  # Project-scoped MCP servers (a repo's .mcp.json) belong only to the role that
+  # runs in the main working directory. Worktree roles are given
+  # --strict-mcp-config so they ignore it.
+  #
+  # Without this, every role loads the project's .mcp.json: a worktree checkout
+  # has none of its own, but Claude Code resolves a worktree to its parent
+  # project, so all roles saw the same servers. For a project whose .mcp.json
+  # carries an identity (the boss repo sends an X-Architect header naming the
+  # machine), that let every role act as that one identity, and answering the
+  # trust prompt either way wrote a project-wide setting that hit all roles at
+  # once.
+  #
+  # Note this leaves worktree roles with NO MCP servers, user-scoped ones
+  # included, since --strict-mcp-config honours only --mcp-config. Set
+  # SWARMFORGE_WORKTREE_MCP=1 to opt a project back into sharing them.
+  local mcp_flag=""
+  if [[ "${SWARMFORGE_WORKTREE_MCP:-0}" != "1" ]]; then
+    local role_worktree_name="${WORKTREE_NAMES[$index]}"
+    if [[ "$role_worktree_name" != "master" && "$role_worktree_name" != "none" ]]; then
+      mcp_flag="--strict-mcp-config "
+    fi
+  fi
+
   case "$agent" in
     claude)
       # CLAUDE_CODE_EFFORT_LEVEL is an Anthropic-only concept. When this role is
@@ -778,7 +801,7 @@ launch_role() {
       # export so providers like MiniMax aren't sent a param they may reject.
       local effort_env="export CLAUDE_CODE_EFFORT_LEVEL='$agent_effort' && "
       [[ -n "$agent_base_url" ]] && effort_env=""
-      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && ${provider_env}${effort_env}cd '$role_worktree' && claude ${model_flag}--append-system-prompt-file '$prompt_file' --permission-mode '$agent_permission' -n 'SwarmForge ${display}' \"\$(cat '$prompt_file')\""
+      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && ${provider_env}${effort_env}cd '$role_worktree' && claude ${model_flag}${mcp_flag}--append-system-prompt-file '$prompt_file' --permission-mode '$agent_permission' -n 'SwarmForge ${display}' \"\$(cat '$prompt_file')\""
       ;;
     codex)
       launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && codex -C '$role_worktree' \"\$(cat '$prompt_file')\""
