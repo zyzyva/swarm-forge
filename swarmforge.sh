@@ -37,7 +37,10 @@ WINDOW_STATE_FILE="$STATE_DIR/windows.tsv"
 WINDOW_WATCHDOG_LOG="$STATE_DIR/window-watchdog.log"
 SESSIONS_FILE="$STATE_DIR/sessions.tsv"
 PROMPTS_DIR="$STATE_DIR/prompts"
-TMUX_SOCKET_DIR="/private/tmp/swarmforge-${UID}"
+# /tmp, not /private/tmp: on macOS /tmp symlinks to /private/tmp so this is the
+# same directory, but /private does not exist on Linux and cannot be created
+# without root, which aborted the launcher outright.
+TMUX_SOCKET_DIR="/tmp/swarmforge-${UID}"
 PROJECT_SOCKET_ID="$(printf '%s' "$WORKING_DIR" | cksum)"
 PROJECT_SOCKET_ID="${PROJECT_SOCKET_ID%% *}"
 TMUX_SOCKET="$TMUX_SOCKET_DIR/$PROJECT_SOCKET_ID.sock"
