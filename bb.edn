@@ -7,4 +7,10 @@
                 (require 'swarmforge.script-test)
                 (let [{:keys [fail error]} (clojure.test/run-tests 'swarmforge.handoff-test
                                                                     'swarmforge.script-test)]
-                  (System/exit (+ fail error))))}}}
+                  (System/exit (+ fail error))))}
+  test-property {:doc "Run handoff protocol property tests (kept separate from normal verification)"
+                 :task (do
+                         (require 'clojure.test)
+                         (require 'swarmforge.handoff-properties)
+                         (let [{:keys [fail error]} (clojure.test/run-tests 'swarmforge.handoff-properties)]
+                           (System/exit (+ fail error))))}}}
