@@ -18,6 +18,8 @@
 - Keep property tests separate from normal verification. Do not include property-test tags in normal unit coverage, Gherkin acceptance mutation, language mutation tools, CRAP, or coverage commands unless the role owns property-test verification or the user explicitly asks for property tests.
 - Keep benchmarks separate from normal verification. Run project benchmarks with the language benchmarking tool as a separate explicit command; never include them in the default handoff verification gate.
 - When a specification or slice touches performance-sensitive behavior (hot paths, query-heavy code, large-collection processing, latency budgets), recommend benchmark coverage for that slice, include it in the slice's verification, and report benchmark results in the handoff.
+- Database audit tools: Elixir projects on PostgreSQL use `ecto_psql_extras` for index usage, unused indexes, sequential scans, cache hit ratios, locks, and slow queries; TypeScript projects on Cloudflare D1 use `EXPLAIN QUERY PLAN` through wrangler on each query a slice adds or changes.
+- When a slice touches migrations, schema, or query code, run the language database audit for that slice and report findings in the handoff.
 - Use github.com/unclebob/Acceptance-Pipeline-Specification for Gherkin acceptance tests.
 - The Acceptance Pipeline Specification supplies `gherkin-parser` and `gherkin-mutator` as Go commands; install or build those commands from that repository instead of reimplementing them in the project.
 - Build APS-supplied commands with Go regardless of the target project language.
