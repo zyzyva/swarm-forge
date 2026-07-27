@@ -305,6 +305,56 @@
 (defn close-swarm []
   (str (fs/path repo-root "close-swarm")))
 
+(defn sync-prompts []
+  (str (fs/path repo-root "sync-prompts")))
+
+(defn seed-swarm-project! [root]
+  (write-file (fs/path root "swarmforge/architect.prompt") "stale\n")
+  (write-file (fs/path root "swarmforge/constitution/project.prompt") "project-specific\n")
+  (write-file (fs/path root "swarmforge/swarmforge.conf") "window coder claude master\n")
+  (write-file (fs/path root "swarmforge/local-notes.md") "keep\n"))
+
+(deftest sync-prompts-dry-run-reports-without-writing
+  (let [root (tmp-dir)]
+    (try
+      (seed-swarm-project! root)
+      (let [result (run {:dir root} (sync-prompts) (str root))]
+        (is (str/includes? (:out result) "architect.prompt"))
+        (is (str/includes? (:out result) "--apply"))
+        (is (= "stale\n" (slurp (str (fs/path root "swarmforge/architect.prompt")))))
+        (is (not (fs/exists? (fs/path root "swarmforge/coder.prompt")))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest sync-prompts-apply-updates-shared-and-preserves-project-files
+  (let [root (tmp-dir)]
+    (try
+      (seed-swarm-project! root)
+      (run {:dir root} (sync-prompts) "--apply" (str root))
+      (is (= (slurp (str (fs/path repo-root "swarmforge/architect.prompt")))
+             (slurp (str (fs/path root "swarmforge/architect.prompt")))))
+      (is (= (slurp (str (fs/path repo-root "swarmforge/coder.prompt")))
+             (slurp (str (fs/path root "swarmforge/coder.prompt")))))
+      (is (= (slurp (str (fs/path repo-root "swarmforge/constitution/engineering.prompt")))
+             (slurp (str (fs/path root "swarmforge/constitution/engineering.prompt")))))
+      (is (= "project-specific\n"
+             (slurp (str (fs/path root "swarmforge/constitution/project.prompt")))))
+      (is (= "window coder claude master\n"
+             (slurp (str (fs/path root "swarmforge/swarmforge.conf")))))
+      (is (= "keep\n" (slurp (str (fs/path root "swarmforge/local-notes.md")))))
+      (is (fs/executable? (fs/path root "swarmforge/scripts/ready_for_next.sh")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest sync-prompts-requires-swarmforge-directory
+  (let [root (tmp-dir)]
+    (try
+      (let [result (run {:dir root :ok? false} (sync-prompts) (str root))]
+        (is (not= 0 (:exit result)))
+        (is (str/includes? (:err result) "swarmforge")))
+      (finally
+        (fs/delete-tree root)))))
+
 (deftest close-swarm-reports-when-no-swarm-state
   (let [root (tmp-dir)]
     (try

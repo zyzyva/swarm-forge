@@ -426,6 +426,19 @@ Use these example directories as starting points for project-local `swarmforge/`
 
 Just type `swarm`. The windows should all pop up.
 
+To tear a swarm down from the CLI, run `close-swarm [project-root]`: it stops the handoff daemon, kills the swarm's tmux sessions, and closes tracked terminal windows.
+
+## Keeping Project Prompts In Sync
+
+Each swarmed project carries its own copy of the shared prompts under `swarmforge/`; nothing inherits changes from this repo automatically. `sync-prompts` pushes the shared files (role prompts, constitution and articles, scripts, and the handoff protocol doc) into a project:
+
+```sh
+sync-prompts ~/projects/my-app          # dry run: lists and diffs pending changes
+sync-prompts --apply ~/projects/my-app  # write the changes
+```
+
+Project-specific files — `constitution/project.prompt`, `swarmforge.conf`, `swarmforge.env`, and `specs/` — are never touched, and files that exist only in the target are never deleted. Running agents pick up synced prompt changes at their next handoff, because every handoff body starts with "Re-read your role and constitution."
+
 ## Context Hygiene For Long-Running Swarms
 
 Agents accumulate context across every slice. After dozens of slices, sessions can run hundreds of thousands of tokens deep — expensive per call, and a real risk for subtle drift (forgetting earlier rules, conflating patterns across slices, repeating corrected mistakes).

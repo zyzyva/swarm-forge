@@ -10,6 +10,8 @@
 #   swarm-attach <role>        — attach tmux to a running swarm session
 #   swarm-attach <TAB>         — completes to architect/coder/reviewer/logger
 #   swarmlog                   — log helper
+#   close-swarm                — stop a running swarm (daemon, tmux, windows)
+#   sync-prompts               — push shared prompts/scripts into a project
 
 set -euo pipefail
 
