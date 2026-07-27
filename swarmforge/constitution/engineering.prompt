@@ -5,6 +5,9 @@
   - Go: install with `go install`; mutation `github.com/unclebob/mutate4go`, CRAP `github.com/unclebob/crap4go`, DRY `github.com/unclebob/dry4go`.
   - Clojure: install with Clojure CLI/deps.edn; mutation `github.com/unclebob/clj-mutate`, CRAP `github.com/unclebob/crap4clj`, DRY `github.com/unclebob/dry4clj`.
   - Java: install with Maven (`mvn`); mutation `github.com/unclebob/mutate4java`, CRAP `github.com/unclebob/crap4java`, DRY `github.com/unclebob/dry4java`.
+  - Elixir: install with `mix deps.get`; mutation `muex` (Hex); property testing `stream_data`, adding `propcheck` only when stateful or model-based properties are needed; benchmarking `benchee`. No dedicated CRAP or DRY tool exists: use test coverage plus Credo complexity checks, and apply the build-a-small-one rule when duplication analysis is required.
+  - TypeScript (Cloudflare Workers): install with `npm install`; test runner Vitest with `@cloudflare/vitest-pool-workers`; mutation `@stryker-mutator/core` with the Vitest runner; property testing `fast-check`; benchmarking Vitest bench mode; DRY `jscpd`. No dedicated CRAP tool exists: use coverage plus lint complexity rules.
+- New swarm projects are Elixir or TypeScript; the Go, Clojure, and Java rows remain for upstream compatibility and existing configurations.
 - For Java projects, avoid using Maven to run tests; build dedicated test runners and run those instead.
 - Work in small, reviewable increments.
 - Scale specification precision and slice size to the implementer's capability tier. When the implementer runs on a cost-optimized model, write smaller, independently verifiable slices with exact files, signatures, enumerated edge cases, and explicit out-of-scope; rely less on the implementer inferring intent.
@@ -13,6 +16,10 @@
 - Separate testable modules from environmentally unsuitable modules that open GUIs, depend on external devices, throw environment errors, emit system errors, or hang under automated tests. Maximize testable code and minimize the unsuitable boundary.
 - Only testable modules should participate in tools that run tests, including unit tests, acceptance tests, coverage, mutation testing, CRAP analysis, DRY analysis that invokes tests, and property tests.
 - Keep property tests separate from normal verification. Do not include property-test tags in normal unit coverage, Gherkin acceptance mutation, language mutation tools, CRAP, or coverage commands unless the role owns property-test verification or the user explicitly asks for property tests.
+- Keep benchmarks separate from normal verification. Run project benchmarks with the language benchmarking tool as a separate explicit command; never include them in the default handoff verification gate.
+- When a specification or slice touches performance-sensitive behavior (hot paths, query-heavy code, large-collection processing, latency budgets), recommend benchmark coverage for that slice, include it in the slice's verification, and report benchmark results in the handoff.
+- Database audit tools: Elixir projects on PostgreSQL use `ecto_psql_extras` for index usage, unused indexes, sequential scans, cache hit ratios, locks, and slow queries; TypeScript projects on Cloudflare D1 use `EXPLAIN QUERY PLAN` through wrangler on each query a slice adds or changes.
+- When a slice touches migrations, schema, or query code, run the language database audit for that slice and report findings in the handoff.
 - Use github.com/unclebob/Acceptance-Pipeline-Specification for Gherkin acceptance tests.
 - The Acceptance Pipeline Specification supplies `gherkin-parser` and `gherkin-mutator` as Go commands; install or build those commands from that repository instead of reimplementing them in the project.
 - Build APS-supplied commands with Go regardless of the target project language.

@@ -1,0 +1,108 @@
+#!/usr/bin/env zsh
+# sync-prompts — push this repo's shared SwarmForge prompts and scripts into a
+# target project's swarmforge/ directory.
+#
+# Default is a dry run that lists and diffs pending changes; pass --apply to
+# write them. Project-specific files (constitution/project.prompt,
+# swarmforge.conf, swarmforge.env, specs/) are never touched, and files that
+# exist only in the target are never deleted.
+set -euo pipefail
+
+usage() {
+  echo "Usage: sync-prompts [--apply] [target-project-root]" >&2
+  echo "Sync shared SwarmForge prompts and scripts from the swarm-forge repo into a project." >&2
+  echo "Without --apply this is a dry run that shows pending changes as diffs." >&2
+  exit 1
+}
+
+APPLY=0
+TARGET=""
+for arg in "$@"; do
+  case "$arg" in
+    --apply) APPLY=1 ;;
+    -h|--help) usage ;;
+    -*) usage ;;
+    *)
+      if [[ -n "$TARGET" ]]; then
+        usage
+      fi
+      TARGET="$arg"
+      ;;
+  esac
+done
+TARGET="${TARGET:-.}"
+
+REPO_ROOT="${0:A:h}"
+SRC="$REPO_ROOT/swarmforge"
+DST_ROOT="$(cd "$TARGET" && pwd)"
+DST="$DST_ROOT/swarmforge"
+
+if [[ ! -d "$SRC" ]]; then
+  echo "Source prompts not found at $SRC" >&2
+  exit 1
+fi
+if [[ ! -d "$DST" ]]; then
+  echo "No swarmforge/ directory at $DST_ROOT; not a SwarmForge project." >&2
+  exit 1
+fi
+if [[ "$SRC" == "$DST" ]]; then
+  echo "Target is the swarm-forge repo itself; nothing to sync." >&2
+  exit 1
+fi
+
+# Project-specific files that stay under the target project's control.
+EXCLUDES=(
+  "constitution/project.prompt"
+  "swarmforge.conf"
+  "swarmforge.env"
+)
+
+is_excluded() {
+  local rel="$1"
+  [[ "$rel" == specs/* ]] && return 0
+  local ex
+  for ex in "${EXCLUDES[@]}"; do
+    [[ "$rel" == "$ex" ]] && return 0
+  done
+  return 1
+}
+
+created=0
+updated=0
+unchanged=0
+
+while IFS= read -r rel; do
+  is_excluded "$rel" && continue
+  src_file="$SRC/$rel"
+  dst_file="$DST/$rel"
+  if [[ ! -f "$dst_file" ]]; then
+    echo "NEW: swarmforge/$rel"
+    created=$((created + 1))
+    if (( APPLY )); then
+      mkdir -p "$(dirname "$dst_file")"
+      cp -p "$src_file" "$dst_file"
+    fi
+  elif ! cmp -s "$src_file" "$dst_file"; then
+    echo "UPDATE: swarmforge/$rel"
+    if (( APPLY )); then
+      cp -p "$src_file" "$dst_file"
+    else
+      diff -u "$dst_file" "$src_file" || true
+    fi
+    updated=$((updated + 1))
+  else
+    unchanged=$((unchanged + 1))
+  fi
+done < <(cd "$SRC" && find . -type f \( -name '*.prompt' -o -name '*.md' -o -path './scripts/*' \) | sed 's|^\./||' | sort)
+
+echo ""
+echo "swarmforge/ sync for $DST_ROOT: $created new, $updated updated, $unchanged unchanged."
+if (( APPLY )); then
+  echo "Applied. Running agents pick up prompt changes at their next handoff."
+else
+  if (( created + updated > 0 )); then
+    echo "Dry run only. Re-run with --apply to write these changes."
+  else
+    echo "Already in sync; nothing to apply (--apply not needed)."
+  fi
+fi

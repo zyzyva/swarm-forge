@@ -79,29 +79,17 @@
 
 (defn set-header! [file field value]
   (let [file (fs/path file)
-        lines (str/split-lines (slurp (str file)))
+        content (slurp (str file))
+        [headers handoff-body] (str/split content #"\n\n" 2)
         prefix (str field ": ")
-        tmp (fs/create-temp-file {:dir (fs/parent file) :prefix ".headers."})
-        result (loop [remaining lines
-                      out []
-                      inserted? false
-                      replaced? false]
-                 (if-let [line (first remaining)]
-                   (cond
-                     (and (not inserted?) (str/blank? line))
-                     (recur (next remaining)
-                            (conj (cond-> out (not replaced?) (conj (str prefix value))) line)
-                            true
-                            replaced?)
-
-                     (and (not inserted?) (str/starts-with? line prefix))
-                     (recur (next remaining) (conj out (str prefix value)) inserted? true)
-
-                     :else
-                     (recur (next remaining) (conj out line) inserted? replaced?))
-                   (cond-> out
-                     (and (not inserted?) (not replaced?)) (conj (str prefix value)))))]
-    (spit (str tmp) (str (str/join "\n" result) "\n"))
+        header-lines (vec (remove #(= "" %) (str/split-lines (or headers ""))))
+        replaced (mapv #(if (str/starts-with? % prefix) (str prefix value) %) header-lines)
+        new-headers (if (some #(str/starts-with? % prefix) header-lines)
+                      replaced
+                      (conj replaced (str prefix value)))
+        tmp (fs/create-temp-file {:dir (fs/parent file) :prefix ".headers."})]
+    (spit (str tmp) (str (str/join "\n" new-headers)
+                         (if handoff-body (str "\n\n" handoff-body) "\n")))
     (fs/move tmp file {:replace-existing true})))
 
 (defn print-task [file]
@@ -187,4 +175,5 @@
         (println (ex-message e)))
       (System/exit (or (:exit (ex-data e)) 1)))))
 
-(apply -main *command-line-args*)
+(when (= *file* (System/getProperty "babashka.file"))
+  (apply -main *command-line-args*))
