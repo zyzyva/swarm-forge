@@ -30,6 +30,16 @@ detect_terminal_backend() {
     return
   fi
 
+  # SSH / no-display sessions must not open GUI terminal windows. The tiled
+  # and terminal-app backends start a window watchdog that tears the whole
+  # swarm down once the cleanup-owner window is missing for ~6s — the classic
+  # "no server running on /private/tmp/swarmforge-*/….sock" failure mode when
+  # launching over SSH while a local Terminal backend is auto-selected.
+  if [[ -n "${SSH_CONNECTION:-}" || -n "${SSH_CLIENT:-}" ]]; then
+    echo "none"
+    return
+  fi
+
   if has_command osascript; then
     echo "terminal-app"
     return
