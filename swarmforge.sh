@@ -711,7 +711,7 @@ launch_role() {
       ;;
   esac
 
-  # Pick the model per role. Opus is the default for most roles; the
+  # Pick the model per role. Opus 5 is the default for most roles; the
   # architect defaults to Fable 5 (frontier planning). For claude and
   # codex backends this selects an Anthropic model; for aider
   # it can be any provider/model string that aider supports
@@ -719,7 +719,7 @@ launch_role() {
   # env vars win; SWARMFORGE_MODEL is a shared fallback. Empty string
   # means "let the backend inherit its own default". The coder defaults to
   # Sonnet for cost; override it back to Opus with
-  # SWARMFORGE_CODER_MODEL=claude-opus-4-8 when a run needs frontier coding.
+  # SWARMFORGE_CODER_MODEL=claude-opus-5 when a run needs frontier coding.
   local agent_model
   case "$role" in
     architect|architect-*)
@@ -729,10 +729,10 @@ launch_role() {
       agent_model="${SWARMFORGE_CODER_MODEL:-${SWARMFORGE_MODEL:-claude-sonnet-5}}"
       ;;
     reviewer|reviewer-*)
-      agent_model="${SWARMFORGE_REVIEWER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-8}}"
+      agent_model="${SWARMFORGE_REVIEWER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5}}"
       ;;
     qa|qa-*)
-      agent_model="${SWARMFORGE_QA_MODEL:-${SWARMFORGE_MODEL:-claude-opus-4-8}}"
+      agent_model="${SWARMFORGE_QA_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5}}"
       ;;
     *)
       # Per-role model for roles beyond the legacy four, mirroring the effort
