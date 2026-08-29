@@ -489,6 +489,15 @@ if [[ -n "$MERGE_BRANCH" && "$TARGET_AGENT" == "aider" ]]; then
   echo "[$TIMESTAMP] [$TARGET_SESSION] [ops] merge $MERGE_BRANCH" >> "$LOG_FILE"
 fi
 
+# A target with no agent backend (e.g. the architect role run as `none`
+# because an interactive session is acting as specifier) must never receive
+# typed input: its pane is a bare shell and the message would be executed as
+# a command. Log-only delivery; that session reads logs/agent_messages.log.
+if [[ "$TARGET_AGENT" == "none" ]]; then
+  echo "Logged handoff for '$TARGET_ROLE' (no agent backend; read logs/agent_messages.log)"
+  exit 0
+fi
+
 tmux -S "$TMUX_SOCKET" send-keys -t "${TARGET_SESSION}:${TMUX_WINDOW_BASE_INDEX}.${TMUX_PANE_BASE_INDEX}" -l -- "$MESSAGE"
 sleep 0.15
 tmux -S "$TMUX_SOCKET" send-keys -t "${TARGET_SESSION}:${TMUX_WINDOW_BASE_INDEX}.${TMUX_PANE_BASE_INDEX}" C-m
