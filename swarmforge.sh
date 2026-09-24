@@ -734,6 +734,11 @@ launch_role() {
     qa|qa-*)
       agent_model="${SWARMFORGE_QA_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5}}"
       ;;
+    cleaner|cleaner-*)
+      # The two-pack's quality/audit seat. Requires a CLI new enough to know
+      # Opus 5.5 (claude-opus-5-5); update Claude Code before launching.
+      agent_model="${SWARMFORGE_CLEANER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5-5}}"
+      ;;
     *)
       # Per-role model for roles beyond the legacy four, mirroring the effort
       # lookup: SWARMFORGE_<ROLE>_MODEL (role uppercased, non-alphanumerics -> _,
