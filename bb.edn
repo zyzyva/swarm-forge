@@ -1,16 +1,70 @@
-{:paths ["test"]
+{:paths ["test" "swarmforge/scripts"]
  :tasks
- {test {:doc "Run helper tests"
+ {test {:doc "Run helper tests and dashboard Playwright tests"
         :task (do
                 (require 'clojure.test)
                 (require 'swarmforge.handoff-test)
                 (require 'swarmforge.script-test)
+                (require 'swarmforge.pack-ui-test)
+                (require 'swarmforge.coverage-in-process-test)
                 (let [{:keys [fail error]} (clojure.test/run-tests 'swarmforge.handoff-test
-                                                                    'swarmforge.script-test)]
-                  (System/exit (+ fail error))))}
+                                                                    'swarmforge.script-test
+                                                                    'swarmforge.pack-ui-test
+                                                                    'swarmforge.coverage-in-process-test)]
+                  (when (pos? (+ fail error))
+                    (System/exit (+ fail error))))
+                (let [dir "test/dashboard"
+                      hint "  cd test/dashboard && npm install && npx playwright install chromium"]
+                  (when-not (babashka.fs/which "npx")
+                    (binding [*out* *err*]
+                      (println "npx not found (Node.js is required for dashboard tests).")
+                      (println "Install dashboard tests with:")
+                      (println hint))
+                    (System/exit 1))
+                  (when-not (babashka.fs/exists? (babashka.fs/path dir "node_modules" "@playwright" "test"))
+                    (binding [*out* *err*]
+                      (println "Playwright is not installed in test/dashboard.")
+                      (println "Install dashboard tests with:")
+                      (println hint))
+                    (System/exit 1))
+                  (let [result (babashka.process/shell {:dir dir :continue true}
+                                                       "npx" "playwright" "test")]
+                    (when-not (zero? (:exit result))
+                      (binding [*out* *err*]
+                        (println "Dashboard tests failed. If Chromium is missing, install it with:")
+                        (println "  cd test/dashboard && npx playwright install chromium"))
+                      (System/exit (or (:exit result) 1)))))
+                (System/exit 0))}
   test-property {:doc "Run handoff protocol property tests (kept separate from normal verification)"
                  :task (do
                          (require 'clojure.test)
                          (require 'swarmforge.handoff-properties)
                          (let [{:keys [fail error]} (clojure.test/run-tests 'swarmforge.handoff-properties)]
-                           (System/exit (+ fail error))))}}}
+                           (System/exit (+ fail error))))}
+  coverage:bb {:doc "Cover Babashka scripts with Cloverage"
+               :extra-deps {io.github.unclebob/crap4clj
+                            {:git/url "https://github.com/unclebob/crap4clj.git"
+                             :git/sha "e068673a852a8142323ac680fa3366de65bc2227"}
+                            cloverage/cloverage
+                            {:git/url "https://github.com/cloverage/cloverage.git"
+                             :git/sha "61e3cac426e9907a9dd01c37597f85c71a57ff90"
+                             :deps/root "cloverage"}}
+               :requires ([crap4clj.bb-coverage :as coverage])
+               :task (apply coverage/-main
+                            "-p" "swarmforge/scripts"
+                            "-s" "test"
+                            "--lcov"
+                            "--no-html"
+                            "--no-text"
+                            "--no-emma-xml"
+                            "--test-ns-regex" "swarmforge\\.coverage-in-process-test"
+                            *command-line-args*)}
+  crap {:doc "Run crap4clj on Babashka scripts"
+        :extra-deps {io.github.unclebob/crap4clj
+                     {:git/url "https://github.com/unclebob/crap4clj.git"
+                      :git/sha "e068673a852a8142323ac680fa3366de65bc2227"}}
+        :requires ([crap4clj.core :as core])
+        :task (apply core/-main
+                     "--source-root" "swarmforge/scripts"
+                     "--coverage-command" "bb coverage:bb"
+                     *command-line-args*)}}}

@@ -16,7 +16,11 @@ It provides a shared structure for role-specific prompts, worktree assignment, t
 
 This fork tracks [unclebob/swarm-forge](https://github.com/unclebob/swarm-forge). Upstream has since moved to a Babashka-based core: helper scripts live under `swarmforge/scripts/` (`.bb` implementations with `.sh` wrappers), a `handoffd.bb` daemon delivers handoffs (see `swarmforge/handoff-protocol.md`), shared constitution articles live under `swarmforge/constitution/articles/`, and the runnable swarm moved off `main` onto starter branches.
 
-Those upstream files are present in this tree from the last merge but are **not yet used by this fork's launcher**. The operational path here remains the root `swarm` wrapper and shell helpers documented below, with sequenced handoffs via `swarmtools/notify-agent.sh`. Adopting the upstream stack would require installing Babashka (`bb`) on every fleet machine and migrating each project's `swarmforge/` config — a deliberate future step, not something this fork does implicitly.
+Those upstream files are present in this tree but are **not used by this fork's launcher**. The operational path here remains the root `swarm` wrapper and shell helpers documented below, with sequenced handoffs via `swarmtools/notify-agent.sh`. Every repo that has this checkout on `PATH` keeps that behaviour.
+
+**Last synced with upstream `main` on 2026-09-28** (upstream's final commit, `f4f5fbc`, 2026-09-04). That merge brought in the `get-swarm-forge` product composer, the pack dashboard (`pack_web`, `pack_board`, `pack_dashboard_request`), the handoff daemon and guard scripts, and upstream's articles. Upstream's README was rewritten as a product landing page; it was not merged here, because this file documents the fork's launcher. Read it at <https://github.com/unclebob/swarm-forge/blob/main/README.md>.
+
+**Moving a project to a pack** (for example the two-pack: `coder` then `cleaner`) uses upstream's stack, not the launcher below. From the project root run `get-swarm-forge two-pack`, then `./swarm`. By default the composer downloads upstream's `main` and pack branches from GitHub; set `SWARMFORGE_BASE_DIR` to this checkout to take `main`'s shared scripts and articles from the fork instead. Packs need Babashka (`bb`). The composer overwrites `swarmforge/constitution/articles/{engineering,workflow,handoffs}.prompt` and the pack's own files, so re-apply any project-local article after installing.
 
 ## What SwarmForge Does
 

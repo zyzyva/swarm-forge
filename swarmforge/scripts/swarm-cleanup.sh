@@ -21,6 +21,10 @@ has_command() {
 source "$SCRIPT_DIR/swarm-terminal-adapter.sh"
 load_terminal_backend "$TERMINAL_BACKEND"
 
+if [[ -x "$SCRIPT_DIR/pack_board.sh" ]]; then
+  "$SCRIPT_DIR/pack_board.sh" archive-all --root "$WORKING_DIR" || true
+fi
+
 if has_command bb; then
   bb "$SCRIPT_DIR/stop_handoff_daemon.bb" "$WORKING_DIR" 2>/dev/null || true
 else

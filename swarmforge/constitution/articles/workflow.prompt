@@ -20,8 +20,12 @@ Implement handoff validation
 By coder.
 ```
 
+- A commit-msg hook appends `By <role>.` when it is missing. Do not skip the hook (`--no-verify`).
+
 ## Temporary Files
 - Use `./tmp/` in your assigned worktree for temporary files; do not use `/tmp`.
+- Parse and dry-check into `./tmp/…`. Write handoff drafts in `./tmp/` as well.
+- Do not use `.swarmforge/handoffs/outbox/tmp/` as scratch; that directory is for the handoff helper.
 
 ## Failure Conditions
 - If the expected git layout or assigned worktree is missing, stop and report instead of silently working in the wrong place.

@@ -46,13 +46,16 @@ the audit trail and restart state.
 `swarmforge.conf` window lines may include an optional receive mode:
 
 ```text
-window <role> <agent> <worktree> [task|batch] [extra-cli-args...]
+window <role> <agent> <worktree> [task|batch] [forward-only|back-one|back-all] [extra-cli-args...]
 ```
 
-When omitted, receive mode defaults to `task`. Any fields after the receive
-mode are passed to the agent CLI as additional arguments. The launcher writes the
-normalized mode into `.swarmforge/roles.tsv`, and agent-facing receive helpers
-read that runtime file rather than reparsing `swarmforge.conf`.
+When omitted, receive mode defaults to `task`. An optional propagation token
+after receive-mode defaults to `forward-only`. `back-one` and `back-all` queue
+merge-only copies to earlier windows; they do not move the card. Any fields after
+those tokens are passed to the agent CLI as additional arguments. The launcher
+writes the normalized mode and propagation into `.swarmforge/roles.tsv`, and
+agent-facing receive helpers read that runtime file rather than reparsing
+`swarmforge.conf`.
 
 Use `batch` for roles that should consume equal-priority queued handoffs as a
 single unit, such as six-pack `cleaner`, `architect`, `hardender`, and `QA`,
@@ -118,7 +121,7 @@ enqueued_at: 2026-06-15T14:05:32Z
 
 Re-read your role and constitution.
 
-merge_and_process coder a1b2c3d9
+merge_and_process.sh coder a1b2c3d9
 ```
 
 For broadcast handoffs, `to` preserves the full recipient list and `recipient`
@@ -147,7 +150,7 @@ Generated body:
 ```text
 Re-read your role and constitution.
 
-merge_and_process coder a1b2c3d9
+merge_and_process.sh coder a1b2c3d9
 ```
 
 The script validates the task name and canonicalizes the commit abbreviation
@@ -163,29 +166,28 @@ and other non-functional churn still require a forward down the chain.
 
 Examples:
 
-- `two-pack`: `coder` -> `cleaner` -> `coder`; `cleaner` always forwards to
-  `coder`.
-- `four-pack`: `specifier` -> `coder` -> `refactorer` -> `architect` ->
-  `specifier`; each intermediate role always forwards to the next role in the
-  chain.
+- `two-pack`: `coder` -> `cleaner`; `cleaner` always forwards to `coder`.
+- `four-pack`: `specifier` -> `coder` -> `refactorer` -> `architect`; each
+  intermediate role always forwards to the next role in the chain.
 - `six-pack`: `specifier` -> `coder` -> `cleaner` -> `architect` -> `hardender`
   -> `QA`; each intermediate role always forwards to the next role in the
   chain.
 
 #### Terminal broadcast
 
-Only the end-of-chain handoff sent to multiple recipients is not forwarded
-further. Each recipient merges that commit (`merge_and_process`) and stops;
-recipients do not re-forward that handoff down the chain.
+The terminal handoff is the last role's `git_handoff` whose `to:` is every
+other role in the pack. That set, not a count of names, marks the card Done.
+Each recipient merges that commit (`merge_and_process.sh`) and stops; they do
+not re-forward. A partial `to:` list is not terminal.
 
 Examples:
 
-- `two-pack`: when `cleaner` sends the return handoff to `coder`, `coder`
-  merges only.
-- `four-pack`: when `architect` sends the return handoff to `specifier`,
-  `specifier` merges only.
-- `six-pack`: when `QA` sends the completion handoff to the other roles, each
-  recipient merges only.
+- `two-pack`: `cleaner` `to: coder` (every other role). `coder` merges only
+  and the card goes to Done.
+- `four-pack`: `architect` `to: specifier,coder,refactorer`. Each recipient
+  merges only and the card goes to Done.
+- `six-pack`: `QA` `to:` the other five roles. Each recipient merges only
+  and the card goes to Done.
 
 ### `note`
 
@@ -193,8 +195,9 @@ Used for one short freeform message.
 
 Agents should not send `note` handoffs unless the user, role prompt, or
 constitution explicitly directs them to send one. When blocked by ambiguity,
-contradiction, or test/specification conflict, an agent should stop and ask for
-clarification instead of sending a `note` handoff unless one of those explicit
+contradiction, or test/specification conflict, an agent should ask the operator
+with `pack_dashboard_request.sh clarify ./tmp/question.txt` instead of asking
+in the pane or sending a `note` handoff unless one of those explicit
 authorities directed that note.
 
 Draft:
@@ -226,6 +229,9 @@ Proposed usage:
 swarm_handoff.sh ./tmp/handoff.txt
 ```
 
+Drafts must live in `./tmp/` in the assigned worktree. `/tmp` and
+`.swarmforge/handoffs/outbox/tmp/` are not valid scratch.
+
 Responsibilities:
 
 - Read a draft handoff file.
@@ -242,6 +248,24 @@ Responsibilities:
 - Canonicalize valid commit abbreviations.
 - Generate `role` from the current sender role for `git_handoff`.
 - Preserve `task` from the draft for `git_handoff`.
+- On the first valid `git_handoff` call, record the exact candidate under
+  `.swarmforge/handoffs/audit_pending/`, print `AUDIT_REQUIRED`, and leave the
+  draft and current inbox item in place. Atomically increment the board card's
+  cumulative audit count for each new challenge; do not increment when the
+  unchanged candidate is submitted.
+- Direct the sender to re-read the complete inbound payload and referenced
+  sources, trace every requirement and constraint to role-appropriate work and
+  verification evidence, examine boundaries and failure cases, and fix and
+  re-audit every finding. Passing checks alone do not establish completeness.
+- Queue a `git_handoff` only when the sender repeats the unchanged candidate.
+  Any changed invocation invalidates that sender's previous challenge. Keep
+  challenges isolated between senders and remove task challenges on rejection,
+  retry, or deletion.
+- Complete the sender's current inbox item only after the audited handoff has
+  been queued. Approval, when required, occurs after this audit gate.
+- Preserve the cumulative audit count with the timestamped task ID through
+  lane changes, approval, rejection, and retry. Deletion removes it, and a new
+  timestamped task ID starts at zero even when it reuses a visible task name.
 - Generate the canonical body.
 - Atomically install the completed file into `outbox/`.
 
@@ -388,7 +412,7 @@ TASK_NAME: task-1-cave-setup
 PAYLOAD:
 Re-read your role and constitution.
 
-merge_and_process architect a1b2c3d9
+merge_and_process.sh architect a1b2c3d9
 ```
 
 ### `done_with_current_task.sh`
@@ -401,7 +425,9 @@ Responsibilities:
 - Add or update `completed_at`.
 - Move the file to `inbox/completed/`.
 - Print the completed task path.
-- Call `ready_for_next_task.sh` after completion and pass through its output.
+- Archive the completing role's pane.
+- Print `MAIL_WAITING` if `inbox/new/` still has handoffs, otherwise `NO_TASK`.
+- Do not dequeue or merge the next item.
 - Refuse to run if there are zero or multiple in-process files, unless an
   explicit repair is made outside the helper.
 
@@ -424,8 +450,8 @@ Responsibilities:
 - Move those files into one `inbox/in_process/batch_<timestamp>_<suffix>/`
   directory.
 - Add or update `dequeued_at` on each selected file.
-- Print the accepted batch path, count, priority, and each task payload in
-  helper-delivered order.
+- Print the accepted batch path, count, the top item's `TASK_NAME`, priority,
+  and each task payload in helper-delivered order.
 - Print `NO_TASK` if no inbox item is available.
 - Refuse ambiguous states, such as multiple in-process batches, unless an
   explicit repair is made outside the helper.
@@ -440,22 +466,17 @@ Responsibilities:
 - Add or update `completed_at` on each file in the batch.
 - Move the batch directory to `inbox/completed/`.
 - Print the completed task paths and completed batch path.
-- Call `ready_for_next_batch.sh` after completion and pass through its output.
+- Archive the completing role's pane.
+- Print `MAIL_WAITING` if `inbox/new/` still has handoffs, otherwise `NO_TASK`.
+- Do not dequeue or merge the next item.
 - Refuse to run if there are zero or multiple in-process batches, unless an
   explicit repair is made outside the helper.
 
-Example success:
+Example success with more mail queued:
 
 ```text
 COMPLETED: .swarmforge/handoffs/inbox/completed/00_20260615T140531Z_000042_from_architect_to_coder.handoff
-TASK: .swarmforge/handoffs/inbox/in_process/50_20260615T140600Z_000043_from_cleaner_to_coder.handoff
-FROM: cleaner
-TYPE: note
-PRIORITY: 50
-PAYLOAD:
-Re-read your role and constitution.
-
-Waiting on QA result before merging cleanup branch.
+MAIL_WAITING
 ```
 
 Example success with no queued follow-up:
@@ -481,17 +502,16 @@ Prompts should instruct agents to follow this loop:
 8. When the task or batch is fully complete, run `done_with_current.sh`.
 9. Treat `note` handoffs as tasks too; after reading or acting on a note, run
    `done_with_current.sh` before accepting any other handoff.
-10. If a done helper prints `TASK: <path>`, treat the printed `PAYLOAD` as the
-   next task.
-11. If a done helper prints `BATCH: <path>`, treat each printed `BATCH_ITEM` as
-   part of the next batch in helper-delivered order.
-12. If a done helper prints `NO_TASK`, stop waiting for work.
+10. If a done helper prints `MAIL_WAITING`, run `ready_for_next.sh` as a new
+    turn to accept the next item.
+11. If a done helper prints `NO_TASK`, stop waiting for work.
 
 On restart, an agent should run `ready_for_next.sh` and follow its output.
 
 Tmux wake-ups are intentionally lossy. They only prompt an idle agent to check
-its durable inbox. A busy agent can ignore them because task completion also
-checks the queue and accepts the next task in priority order.
+its durable inbox. A busy agent can ignore them. After `done_with_current.sh`
+prints `MAIL_WAITING`, the agent runs `ready_for_next.sh` to accept the next
+item.
 
 ## Audit Trail
 
@@ -561,7 +581,8 @@ Delivery should be transaction-like:
 
 The current daemon-backed protocol uses these helper scripts:
 
-- `swarm_handoff.sh` validates and queues outbound handoff drafts.
+- `swarm_handoff.sh` validates outbound handoff drafts, enforces the two-call
+  audit gate for Git handoffs, and queues notes or audited Git handoffs.
 - `ready_for_next.sh` dispatches to the correct ready helper for the current
   role's configured receive mode.
 - `done_with_current.sh` dispatches to the correct done helper for the current

@@ -62,8 +62,8 @@
       (println line)))
   (System/exit status))
 
-(defn run-ready! []
-  (process/exec (str (fs/path script-dir "ready_for_next_batch.sh"))))
+(defn finish-done! []
+  (process/exec "bb" (str (fs/path script-dir "handoff_lib.bb")) "finish-done"))
 
 (defn -main []
   (let [inbox (inbox-dir)
@@ -101,6 +101,7 @@
             (println "COMPLETED:" (str target-file))))
         (fs/delete source-dir)
         (println "COMPLETED_BATCH:" (str target-dir))
-        (run-ready!)))))
+        (finish-done!)))))
 
-(-main)
+(when (= (str *file*) (System/getProperty "babashka.file"))
+  (-main))

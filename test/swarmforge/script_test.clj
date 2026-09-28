@@ -141,6 +141,94 @@
       (finally
         (fs/delete-tree root)))))
 
+(deftest swarmforge-parses-window-invisible
+  ;; Given window-invisible specifier codex master
+  ;; When --test-parse
+  ;; Then specifier is listed and visible? is false
+  (let [root (tmp-dir)]
+    (try
+      (write-file (fs/path root "swarmforge/constitution.prompt")
+                  "Read articles.\n")
+      (write-file (fs/path root "swarmforge/swarmforge.conf")
+                  "window-invisible specifier codex master\n")
+      (write-file (fs/path root "swarmforge/roles/specifier.prompt") "specifier\n")
+      (let [result (run {:dir root} (script "swarmforge.bb") "--test-parse" (str root))]
+        (is (str/includes? (:out result) "specifier"))
+        (is (str/includes? (:out result) "invisible")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest swarmforge-required-helpers-include-pack-scripts
+  ;; Given the launcher required-helpers list
+  ;; When --test-required-helpers
+  ;; Then pack_web.sh and pack_board.sh are listed
+  (let [result (run {:dir repo-root} (script "swarmforge.bb") "--test-required-helpers")
+        names (set (str/split-lines (str/trim (:out result))))]
+    (is (contains? names "pack_web.sh"))
+    (is (contains? names "pack_board.sh"))
+    (is (contains? names "pack_dashboard_request.sh"))))
+
+(defn write-pack-conf! [root conf]
+  (write-file (fs/path root "swarmforge/constitution.prompt") "Read articles.\n")
+  (write-file (fs/path root "swarmforge/swarmforge.conf") conf)
+  (write-file (fs/path root "swarmforge/roles/specifier.prompt") "specifier\n")
+  (write-file (fs/path root "swarmforge/roles/coder.prompt") "coder\n"))
+
+(deftest swarmforge-launch-plan-starts-pack-web-and-skips-invisible-terminals
+  ;; Given window-invisible specifier and a visible coder window
+  ;; When --test-launch-plan
+  ;; Then pack_web starts, specifier skips Terminal, and coder still opens Terminal
+  (let [root (tmp-dir)]
+    (try
+      (write-pack-conf! root
+                        (str "window-invisible specifier codex master\n"
+                             "window coder codex coder\n"))
+      (let [out (:out (run {:dir root} (script "swarmforge.bb")
+                           "--test-launch-plan" (str root)))]
+        (is (str/includes? out "pack_web start"))
+        (is (str/includes? out "skip-terminal specifier"))
+        (is (str/includes? out "open-terminal coder"))
+        (is (not (str/includes? out "skip-terminal coder")))
+        (is (not (str/includes? out "open-terminal specifier"))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest swarmforge-fails-without-a-master-worktree
+  ;; Given only window coder codex coder
+  ;; When --test-parse
+  ;; Then exit 1 and error mentions master
+  (let [root (tmp-dir)]
+    (try
+      (write-file (fs/path root "swarmforge/constitution.prompt")
+                  "Read articles.\n")
+      (write-file (fs/path root "swarmforge/swarmforge.conf")
+                  "window coder codex coder\n")
+      (write-file (fs/path root "swarmforge/roles/coder.prompt") "coder\n")
+      (let [result (run {:dir root :ok? false} (script "swarmforge.bb") "--test-parse" (str root))]
+        (is (= 1 (:exit result)))
+        (is (str/includes? (:err result) "master")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest swarmforge-fails-with-two-master-worktrees
+  ;; Given two windows whose worktree is master
+  ;; When --test-parse
+  ;; Then exit 1 and error mentions master
+  (let [root (tmp-dir)]
+    (try
+      (write-file (fs/path root "swarmforge/constitution.prompt")
+                  "Read articles.\n")
+      (write-file (fs/path root "swarmforge/swarmforge.conf")
+                  (str "window specifier codex master\n"
+                       "window coder codex master\n"))
+      (write-file (fs/path root "swarmforge/roles/specifier.prompt") "specifier\n")
+      (write-file (fs/path root "swarmforge/roles/coder.prompt") "coder\n")
+      (let [result (run {:dir root :ok? false} (script "swarmforge.bb") "--test-parse" (str root))]
+        (is (= 1 (:exit result)))
+        (is (str/includes? (:err result) "master")))
+      (finally
+        (fs/delete-tree root)))))
+
 (deftest swarmforge-terminal-bridge-preserves-adapter-globals
   (let [root (tmp-dir)]
     (try
@@ -199,8 +287,59 @@
       (write-file (fs/path root "swarmforge/roles/cleaner.prompt") "cleaner\n")
       (let [result (run {:dir root} (script "swarmforge.bb") "--test-parse" (str root))]
         (is (str/includes? (:out result) "coder Coder"))
-        (is (str/includes? (:out result) "task --yolo"))
-        (is (str/includes? (:out result) "batch --allow-all-tools")))
+        (is (str/includes? (:out result) "task forward-only --yolo"))
+        (is (str/includes? (:out result) "batch forward-only --allow-all-tools")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest swarmforge-parses-propagation-tokens
+  ;; Given omitted, back-one, and back-all after receive-mode, plus extra CLI args
+  ;; When --test-parse
+  ;; Then omitted is forward-only, tokens round-trip in roles.tsv, extra args still apply
+  (let [root (tmp-dir)]
+    (try
+      (write-file (fs/path root "swarmforge/constitution.prompt")
+                  "Read articles.\n")
+      (write-file (fs/path root "swarmforge/swarmforge.conf")
+                  (str "window specifier grok master\n"
+                       "window coder grok coder task --yolo\n"
+                       "window refactorer grok refactorer task back-one\n"
+                       "window architect grok architect batch back-all --allow-all-tools\n"))
+      (write-file (fs/path root "swarmforge/roles/specifier.prompt") "specifier\n")
+      (write-file (fs/path root "swarmforge/roles/coder.prompt") "coder\n")
+      (write-file (fs/path root "swarmforge/roles/refactorer.prompt") "refactorer\n")
+      (write-file (fs/path root "swarmforge/roles/architect.prompt") "architect\n")
+      (let [result (run {:dir root} (script "swarmforge.bb") "--test-parse" (str root))
+            out (:out result)]
+        (is (zero? (:exit result)))
+        (is (str/includes? out "specifier Specifier"))
+        (is (str/includes? out "task forward-only"))
+        (is (str/includes? out "task forward-only --yolo"))
+        (is (str/includes? out "task back-one"))
+        (is (str/includes? out "batch back-all --allow-all-tools"))
+        (let [roles (slurp (str (fs/path root ".swarmforge/roles.tsv")))
+              lines (str/split-lines roles)]
+          (is (str/ends-with? (first lines) "\ttask\tforward-only"))
+          (is (str/includes? (nth lines 1) "\ttask\tforward-only"))
+          (is (str/ends-with? (nth lines 2) "\ttask\tback-one"))
+          (is (str/ends-with? (nth lines 3) "\tbatch\tback-all"))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest handoff-lib-reads-role-propagation
+  (let [root (tmp-dir)]
+    (try
+      (init-repo! root)
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (str "coder\tmaster\t" root "\tsession\tCoder\tcodex\ttask\n"
+                       "cleaner\tcleaner\t" root "\tsession\tCleaner\tcodex\tbatch\tback-one\n"
+                       "architect\tarchitect\t" root "\tsession\tArchitect\tcodex\tbatch\tback-all\n"))
+      (let [coder (run {:dir root} (script "handoff_lib.bb") "role-propagation" "coder")
+            cleaner (run {:dir root} (script "handoff_lib.bb") "role-propagation" "cleaner")
+            architect (run {:dir root} (script "handoff_lib.bb") "role-propagation" "architect")]
+        (is (str/includes? (:out coder) "forward-only"))
+        (is (str/includes? (:out cleaner) "back-one"))
+        (is (str/includes? (:out architect) "back-all")))
       (finally
         (fs/delete-tree root)))))
 
@@ -237,7 +376,95 @@
       (finally
         (fs/delete-tree root)))))
 
-(deftest grok-launch-command-defaults-to-bypass-permissions-with-always-approve
+(deftest start-pack-web-drops-stale-dashboard-url
+  ;; Given a leftover dashboard-url and pack_web.pid from a prior run
+  ;; When SwarmForge prepares to start the dashboard
+  ;; Then those stale files are removed so the new port is recorded
+  (let [root (tmp-dir)]
+    (try
+      (write-file (fs/path root ".swarmforge/dashboard-url") "http://127.0.0.1:64002\n")
+      (write-file (fs/path root ".swarmforge/pack_web.pid") "99999999\n")
+      (let [out (str/trim (:out (run {:dir root}
+                                     (script "swarmforge.bb")
+                                     "--test-reset-pack-web-state"
+                                     (str root))))]
+        (is (= "false false" out))
+        (is (not (fs/exists? (fs/path root ".swarmforge/dashboard-url"))))
+        (is (not (fs/exists? (fs/path root ".swarmforge/pack_web.pid")))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest grok-lieutenant-launch-waits-for-chat
+  ;; Given a host lieutenant
+  ;; When SwarmForge builds the grok launch command
+  ;; Then grok loads rules and stays idle — no initial --verbatim prompt
+  (let [root (tmp-dir)]
+    (try
+      (let [command (:out (run {:dir root}
+                               (script "swarmforge.bb")
+                               "--test-lieutenant-launch-command"
+                               (str root)))]
+        (is (str/includes? command "grok --cwd "))
+        (is (str/includes? command "--minimal --rules \"$(cat "))
+        (is (str/includes? command ".swarmforge/prompts/lieutenant.md"))
+        (is (not (str/includes? command "--verbatim")))
+        (is (fs/exists? (fs/path root ".swarmforge/prompts/lieutenant.md"))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest lieutenant-launch-reads-host-conf
+  ;; Given a host conf line Lieutenant claude --yolo
+  ;; When SwarmForge builds the lieutenant launch command
+  ;; Then the command uses claude with --yolo
+  (let [root (tmp-dir)]
+    (try
+      (write-file (fs/path root "swarmforge/swarmforge.conf") "Lieutenant claude --yolo\n")
+      (let [command (:out (run {:dir root}
+                               (script "swarmforge.bb")
+                               "--test-lieutenant-launch-command"
+                               (str root)))]
+        (is (str/includes? command "claude --append-system-prompt-file "))
+        (is (str/includes? command "--yolo"))
+        (is (not (str/includes? command "grok --cwd "))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest grok-launch-command-uses-minimal-for-scrollback
+  ;; Given a grok pack role
+  ;; When SwarmForge builds the launch command
+  ;; Then grok runs --minimal so finalized chatter is in tmux scrollback
+  (let [root (tmp-dir)]
+    (try
+      (let [command (:out (run {:dir root}
+                               (script "swarmforge.bb")
+                               "--test-launch-command"
+                               (str root)
+                               "grok"))]
+        (is (str/includes? command " --minimal ")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest launch-command-puts-transcript-in-tmux-scrollback
+  ;; Given each pack backend
+  ;; When SwarmForge builds the launch command
+  ;; Then Codex and Copilot use --no-alt-screen, Claude disables the
+  ;; alternate screen, and Grok keeps --minimal
+  (doseq [[agent needle] [["codex" "--no-alt-screen"]
+                          ["copilot" "--no-alt-screen"]
+                          ["claude" "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1"]
+                          ["grok" "--minimal"]]]
+    (let [root (tmp-dir)]
+      (try
+        (let [command (:out (run {:dir root}
+                                 (script "swarmforge.bb")
+                                 "--test-launch-command"
+                                 (str root)
+                                 agent))]
+          (is (str/includes? command needle) agent))
+        (finally
+          (fs/delete-tree root))))))
+
+(deftest grok-launch-command-uses-bypass-permissions-with-always-approve
   (let [root (tmp-dir)]
     (try
       (let [result (run {:dir root}
@@ -268,6 +495,323 @@
       (finally
         (fs/delete-tree root)))))
 
+(deftest launch-command-yolos-every-backend
+  ;; Given a pack role with no extra-args
+  ;; When --test-launch-command for each backend
+  ;; Then the start command bypasses permission prompts
+  (doseq [[agent needle] [["codex" "--yolo"]
+                          ["copilot" "--yolo"]
+                          ["claude" "--permission-mode bypassPermissions"]
+                          ["grok" "--permission-mode bypassPermissions"]]]
+    (let [root (tmp-dir)]
+      (try
+        (let [command (:out (run {:dir root}
+                                 (script "swarmforge.bb")
+                                 "--test-launch-command"
+                                 (str root)
+                                 agent))]
+          (is (str/includes? command needle) agent))
+        (finally
+          (fs/delete-tree root))))))
+
+(deftest launch-command-puts-project-tool-bin-on-path
+  ;; Given a launched role
+  ;; When the start command is built
+  ;; Then `.swarmforge/bin` is on PATH so require/ensure wrappers are found
+  (let [root (tmp-dir)]
+    (try
+      (let [command (:out (run {:dir root}
+                               (script "swarmforge.bb")
+                               "--test-launch-command"
+                               (str root)
+                               "codex"))]
+        (is (str/includes? command (str ".swarmforge/bin':'"))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest swarmforge-trusts-codex-worktree-once
+  ;; Given a Codex worktree with no projects block
+  ;; When startup ensures trust
+  ;; Then config.toml gains trust_level trusted for that exact path, once
+  (let [root (tmp-dir)
+        home (fs/create-temp-dir {:prefix "codex-home."})
+        wt (str (fs/absolutize root))]
+    (try
+      (doseq [_ [1 2]]
+        (run {:dir root :env {"CODEX_HOME" (str home)
+                              "HOME" (str home)
+                              "PATH" (System/getenv "PATH")
+                              "GIT_CONFIG_NOSYSTEM" "1"}}
+             (script "swarmforge.bb")
+             "--test-ensure-codex-trust"
+             wt))
+      (let [cfg (slurp (str (fs/path home "config.toml")))
+            header (str "[projects." (pr-str wt) "]")
+            hits (count (re-seq (re-pattern (java.util.regex.Pattern/quote header)) cfg))]
+        (is (str/includes? cfg header))
+        (is (str/includes? cfg "trust_level = \"trusted\""))
+        (is (= 1 hits)))
+      (finally
+        (fs/delete-tree root)
+        (fs/delete-tree home)))))
+
+(deftest swarmforge-does-not-overwrite-existing-codex-project-block
+  ;; Given an existing projects block for the worktree
+  ;; When startup ensures trust
+  ;; Then that block is left unchanged
+  (let [root (tmp-dir)
+        home (fs/create-temp-dir {:prefix "codex-home."})
+        wt (str (fs/absolutize root))
+        header (str "[projects." (pr-str wt) "]")
+        original (str header "\ntrust_level = \"untrusted\"\nnote = \"keep\"\n")]
+    (try
+      (write-file (fs/path home "config.toml") original)
+      (run {:dir root :env {"CODEX_HOME" (str home)
+                            "PATH" (System/getenv "PATH")
+                            "GIT_CONFIG_NOSYSTEM" "1"}}
+           (script "swarmforge.bb")
+           "--test-ensure-codex-trust"
+           wt)
+      (is (= original (slurp (str (fs/path home "config.toml")))))
+      (finally
+        (fs/delete-tree root)
+        (fs/delete-tree home)))))
+
+(deftest swarmforge-trust-does-not-duplicate-existing-config
+  ;; Given a config.toml that already has another project table
+  ;; When startup trusts a new worktree
+  ;; Then the old table appears once and the new path appears once
+  (let [root (tmp-dir)
+        home (fs/create-temp-dir {:prefix "codex-home."})
+        wt (str (fs/absolutize root))
+        other "[projects.\"/other\"]\ntrust_level = \"trusted\"\n"]
+    (try
+      (write-file (fs/path home "config.toml") (str "model = \"gpt-5.5\"\n\n" other))
+      (run {:dir root :env {"CODEX_HOME" (str home)
+                            "PATH" (System/getenv "PATH")
+                            "GIT_CONFIG_NOSYSTEM" "1"}}
+           (script "swarmforge.bb")
+           "--test-ensure-codex-trust"
+           wt)
+      (let [cfg (slurp (str (fs/path home "config.toml")))]
+        (is (= 1 (count (re-seq #"model = \"gpt-5.5\"" cfg))))
+        (is (= 1 (count (re-seq #"\[projects\.\"/other\"\]" cfg))))
+        (is (= 1 (count (re-seq (re-pattern (java.util.regex.Pattern/quote
+                                             (str "[projects." (pr-str wt) "]")))
+                                cfg)))))
+      (finally
+        (fs/delete-tree root)
+        (fs/delete-tree home)))))
+
+(deftest swarm-tool-knows-constitution-tool-names
+  ;; Given a pack project
+  ;; When require runs for clj-mutate
+  ;; Then it is a known tool (missing until ensure), not Unknown tool
+  (let [root (tmp-dir)]
+    (try
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
+      (let [missing (run {:dir root :ok? false}
+                         (script "swarm_tool.sh") "require" "clj-mutate")
+            help (run {:dir root :ok? false}
+                      (script "swarm_tool.sh") "--help")]
+        (is (not= 0 (:exit missing)))
+        (is (str/includes? (:err missing) "MISSING: clj-mutate"))
+        (is (not (str/includes? (:err missing) "Unknown tool")))
+        (is (str/includes? (str (:err help) (:out help)) "clj-mutate"))
+        (is (str/includes? (str (:err help) (:out help)) "crap4clj"))
+        (is (str/includes? (str (:err help) (:out help)) "dry4clj"))
+        (is (str/includes? (str (:err help) (:out help)) "cloverage"))
+        (is (str/includes? (str (:err help) (:out help)) "speclj"))
+        (is (str/includes? (str (:err help) (:out help)) "speclj-structure-check")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest swarm-tool-ensure-cloverage-invokes-cloverage
+  ;; Given a pack project
+  ;; When swarm_tool.sh ensure cloverage
+  ;; Then the wrapper launches cloverage.coverage, not crap4clj
+  (let [root (tmp-dir)]
+    (try
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
+      (run {:dir root} (script "swarm_tool.sh") "ensure" "cloverage")
+      (let [wrapper (slurp (str (fs/path root ".swarmforge/bin/cloverage")))]
+        (is (str/includes? wrapper "cloverage.coverage"))
+        (is (str/includes? wrapper "cloverage/cloverage"))
+        (is (str/includes? wrapper "\"src\""))
+        (is (str/includes? wrapper "\"spec\""))
+        (is (str/includes? wrapper "\"test\""))
+        (is (str/includes? wrapper "-s spec"))
+        (is (str/includes? wrapper "-r speclj"))
+        (is (str/includes? wrapper "speclj/speclj"))
+        (is (not (str/includes? wrapper "crap4clj")))
+        (is (zero? (:exit (run {:dir root} (script "swarm_tool.sh") "require" "cloverage"))))
+        (is (zero? (:exit (run {:dir root} (script "swarm_tool.sh") "require" "Cloverage")))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest swarm-tool-ensure-speclj-uses-speclj-main
+  ;; Given a pack project
+  ;; When swarm_tool.sh ensure speclj
+  ;; Then the wrapper runs speclj.main -c spec, not speclj.cli
+  (let [root (tmp-dir)]
+    (try
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
+      (run {:dir root} (script "swarm_tool.sh") "ensure" "speclj")
+      (let [wrapper (slurp (str (fs/path root ".swarmforge/bin/speclj")))]
+        (is (str/includes? wrapper "speclj.main"))
+        (is (str/includes? wrapper "-c spec"))
+        (is (str/includes? wrapper "3.13.0"))
+        (is (not (str/includes? wrapper "speclj.cli"))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest swarm-tool-ensure-crap4clj-also-installs-cloverage
+  ;; Given a pack project with local crap4clj source
+  ;; When swarm_tool.sh ensure crap4clj
+  ;; Then both crap4clj and cloverage wrappers are installed
+  (let [root (tmp-dir)]
+    (try
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
+      (write-file (fs/path root ".swarmforge/tools/crap4clj/bb.edn")
+                  "{:tasks {crap4clj identity}}\n")
+      (run {:dir root} (script "swarm_tool.sh") "ensure" "crap4clj")
+      (is (fs/executable? (fs/path root ".swarmforge/bin/crap4clj")))
+      (is (fs/executable? (fs/path root ".swarmforge/bin/cloverage")))
+      (is (str/includes? (slurp (str (fs/path root ".swarmforge/bin/cloverage")))
+                         "cloverage.coverage"))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest swarm-tool-ensure-clj-mutate-also-installs-cloverage
+  ;; Given a pack project with local clj-mutate source
+  ;; When swarm_tool.sh ensure clj-mutate
+  ;; Then both clj-mutate and cloverage wrappers are installed
+  (let [root (tmp-dir)]
+    (try
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
+      (write-file (fs/path root ".swarmforge/tools/clj-mutate/bb.edn")
+                  "{:tasks {clj-mutate identity}}\n")
+      (run {:dir root} (script "swarm_tool.sh") "ensure" "clj-mutate")
+      (is (fs/executable? (fs/path root ".swarmforge/bin/clj-mutate")))
+      (is (fs/executable? (fs/path root ".swarmforge/bin/cloverage")))
+      (is (str/includes? (slurp (str (fs/path root ".swarmforge/bin/cloverage")))
+                         "cloverage.coverage"))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest swarm-tool-require-and-ensure-install-aps-wrappers
+  ;; Given a project without APS tools
+  ;; When require runs, it reports missing
+  ;; When ensure runs against a local APS source, wrappers land in .swarmforge/bin
+  (let [root (tmp-dir)
+        aps (fs/path root "aps-src")]
+    (try
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
+      (write-file (fs/path aps "bb.edn") "{:tasks {gherkin-parser identity\n  gherkin-ir-dry-checker identity}}\n")
+      (let [missing (run {:dir root :ok? false}
+                         (script "swarm_tool.sh") "require" "gherkin-parser")]
+        (is (not= 0 (:exit missing)))
+        (is (str/includes? (:err missing) "MISSING: gherkin-parser")))
+      (run {:dir root
+            :env {"SWARMFORGE_TOOL_SRC" (str aps)
+                  "PATH" (System/getenv "PATH")
+                  "GIT_CONFIG_NOSYSTEM" "1"}}
+           (script "swarm_tool.sh") "ensure" "gherkin-parser")
+      (run {:dir root
+            :env {"SWARMFORGE_TOOL_SRC" (str aps)
+                  "PATH" (System/getenv "PATH")
+                  "GIT_CONFIG_NOSYSTEM" "1"}}
+           (script "swarm_tool.sh") "ensure" "ir-dry-checker")
+      (let [parser (fs/path root ".swarmforge/bin/gherkin-parser")
+            dry (fs/path root ".swarmforge/bin/ir-dry-checker")]
+        (is (fs/executable? parser))
+        (is (fs/executable? dry))
+        (is (zero? (:exit (run {:dir root} (script "swarm_tool.sh") "require" "gherkin-parser"))))
+        (is (zero? (:exit (run {:dir root} (script "swarm_tool.sh") "require" "ir-dry-checker")))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest swarmforge-start-order-opens-dashboard-before-agents
+  ;; Given a pack
+  ;; When --test-start-order
+  ;; Then pack_web starts before agents
+  (let [root (tmp-dir)]
+    (try
+      (write-pack-conf! root
+                        (str "window-invisible specifier codex master\n"
+                             "window coder codex coder\n"))
+      (let [out (:out (run {:dir root} (script "swarmforge.bb")
+                           "--test-start-order" (str root)))
+            pack (.indexOf out "pack_web start")
+            agents (.indexOf out "start-agents")]
+        (is (>= pack 0))
+        (is (>= agents 0))
+        (is (< pack agents)))
+      (finally
+        (fs/delete-tree root)))))
+
+(defn commit-body [root]
+  (:out (run {:dir root} "git" "log" "-1" "--format=%B")))
+
+(deftest commit-msg-hook-adds-missing-role-byline
+  ;; Given a specifier commit whose message has no byline
+  ;; When the commit-msg hook runs
+  ;; Then it appends `By specifier.` and does not duplicate an existing byline
+  (let [root (tmp-dir)]
+    (try
+      (init-repo! root)
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
+      (run {:dir root}
+           (script "swarmforge.bb")
+           "--test-install-hooks"
+           (str root))
+      (write-file (fs/path root "spec.md") "hunt\n")
+      (run {:dir root} "git" "add" "spec.md")
+      (run {:dir root :env {"SWARMFORGE_ROLE" "specifier"
+                            "PATH" (System/getenv "PATH")
+                            "GIT_CONFIG_NOSYSTEM" "1"}}
+           "git" "commit" "-q" "-m" "Specify Hunt the Wumpus console app")
+      (let [body (commit-body root)]
+        (is (str/includes? body "Specify Hunt the Wumpus console app"))
+        (is (str/includes? body "By specifier."))
+        (is (= 1 (count (re-seq #"By specifier\." body)))))
+      (write-file (fs/path root "spec.md") "hunt two\n")
+      (run {:dir root} "git" "add" "spec.md")
+      (run {:dir root :env {"SWARMFORGE_ROLE" "specifier"
+                            "PATH" (System/getenv "PATH")
+                            "GIT_CONFIG_NOSYSTEM" "1"}}
+           "git" "commit" "-q" "-m" "Add a scenario\n\nBy specifier.")
+      (is (= 1 (count (re-seq #"By specifier\." (commit-body root)))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest commit-msg-hook-infers-role-from-worktree
+  ;; Given SWARMFORGE_ROLE is unset and roles.tsv maps this worktree to specifier
+  ;; When a commit is made
+  ;; Then the hook still adds `By specifier.`
+  (let [root (tmp-dir)]
+    (try
+      (init-repo! root)
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
+      (run {:dir root}
+           (script "swarmforge.bb")
+           "--test-install-hooks"
+           (str root))
+      (write-file (fs/path root "spec.md") "hunt\n")
+      (run {:dir root} "git" "add" "spec.md")
+      (run {:dir root} "git" "commit" "-q" "-m" "Specify Hunt the Wumpus console app")
+      (is (str/includes? (commit-body root) "By specifier."))
+      (finally
+        (fs/delete-tree root)))))
+
 (deftest window-watchdog-rewrites-window-state-and-id-list
   (let [root (tmp-dir)
         state-file (fs/path root "windows.tsv")
@@ -277,7 +821,7 @@
                   (str "1\told-a\tswarmforge-coder\tSwarmForge Coder\n"
                        "2\told-b\tswarmforge-cleaner\tSwarmForge Cleaner\n"))
       (write-file ids-file "old-a\nold-b\n")
-      (run {:dir root} (script "swarm-window-watchdog.bb") "--rewrite-window-id" "windows.tsv" "window-ids" "2" "new-b")
+      (run {:dir root} (script "swarm_window_watchdog.bb") "--rewrite-window-id" "windows.tsv" "window-ids" "2" "new-b")
       (let [state (slurp (str state-file))
             ids (slurp (str ids-file))]
         (is (str/includes? state "1\told-a\tswarmforge-coder\tSwarmForge Coder"))
@@ -298,6 +842,28 @@
                         "--test-tmux-base-indexes"
                         sock)]
         (is (= "1 1" (str/trim (:out result)))))
+      (finally
+        (run {:dir root :ok? false} "tmux" "-S" sock "kill-server")
+        (fs/delete-tree root)))))
+
+(deftest role-session-keeps-tmux-scrollback
+  ;; Given a tmux socket
+  ;; When SwarmForge creates a role session
+  ;; Then history-limit keeps thousands of lines
+  (let [root (tmp-dir)
+        sock (str root "/test.sock")
+        conf (fs/path root "tmux.conf")]
+    (try
+      (write-file conf "set -g history-limit 50\n")
+      (run {:dir root} "tmux" "-S" sock "-f" (str conf) "new-session" "-d" "-s" "probe" "sleep" "120")
+      (let [result (run {:dir root}
+                        (script "swarmforge.bb")
+                        "--test-create-role-session"
+                        sock
+                        "swarmforge-specifier")
+            limit (Long/parseLong (str/trim (:out result)))]
+        (is (zero? (:exit result)))
+        (is (>= limit 2000)))
       (finally
         (run {:dir root :ok? false} "tmux" "-S" sock "kill-server")
         (fs/delete-tree root)))))
@@ -413,3 +979,219 @@
           (.destroyForcibly daemon))
         (run {:dir root :ok? false} "tmux" "-S" sock "kill-server")
         (fs/delete-tree root)))))
+
+(defn write-echo-tool! [root tool]
+  (write-file (fs/path root ".swarmforge/roles.tsv")
+              (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
+  (write-file (fs/path root ".swarmforge/tools" tool "bb.edn")
+              (str "{:tasks {" tool " (apply println *command-line-args*)}}\n")))
+
+(deftest clj-mutate-wrapper-is-differential-with-four-workers
+  ;; Given an installed clj-mutate wrapper
+  ;; When it is invoked with --mutate-all
+  ;; Then --mutate-all is dropped and --max-workers 4 is used
+  (let [root (tmp-dir)]
+    (try
+      (write-echo-tool! root "clj-mutate")
+      (run {:dir root} (script "swarm_tool.sh") "ensure" "clj-mutate")
+      (let [out (:out (run {:dir root}
+                           (str (fs/path root ".swarmforge/bin/clj-mutate"))
+                           "src/htw/game.clj" "--reuse-lcov" "--mutate-all"
+                           "--test-command" "bb test"))]
+        (is (str/includes? out "--max-workers 4"))
+        (is (not (str/includes? out "--mutate-all"))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest clj-mutate-scan-does-not-inject-max-workers
+  ;; Given an installed clj-mutate wrapper
+  ;; When it is invoked with --scan
+  ;; Then it does not add --max-workers
+  (let [root (tmp-dir)]
+    (try
+      (write-echo-tool! root "clj-mutate")
+      (run {:dir root} (script "swarm_tool.sh") "ensure" "clj-mutate")
+      (let [out (:out (run {:dir root}
+                           (str (fs/path root ".swarmforge/bin/clj-mutate"))
+                           "src/htw/game.clj" "--scan"))]
+        (is (not (str/includes? out "--max-workers"))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest gherkin-mutator-wrapper-is-differential-with-four-workers
+  ;; Given an installed gherkin-mutator wrapper
+  ;; When it is invoked with --level full
+  ;; Then the level is hard and --workers 4 is used
+  (let [root (tmp-dir)
+        aps (fs/path root "aps-src")]
+    (try
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
+      (write-file (fs/path aps "bb.edn")
+                  "{:tasks {gherkin-mutator (apply println *command-line-args*)}}\n")
+      (run {:dir root :env {"SWARMFORGE_TOOL_SRC" (str aps)
+                            "PATH" (System/getenv "PATH")
+                            "GIT_CONFIG_NOSYSTEM" "1"}}
+           (script "swarm_tool.sh") "ensure" "gherkin-mutator")
+      (let [out (:out (run {:dir root}
+                           (str (fs/path root ".swarmforge/bin/gherkin-mutator"))
+                           "--feature" "features/a.feature" "--level" "full"
+                           "--runner-worker" "true"))]
+        (is (str/includes? out "--level hard"))
+        (is (str/includes? out "--workers 4"))
+        (is (not (str/includes? out "--level full"))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest constitution-tool-wrappers-do-not-use-a-lock-file
+  ;; Given an installed constitution tool wrapper
+  ;; When it is written
+  ;; Then it does not take a project lock directory
+  (let [root (tmp-dir)]
+    (try
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
+      (write-file (fs/path root ".swarmforge/tools/crap4clj/bb.edn")
+                  "{:tasks {crap4clj identity}}\n")
+      (run {:dir root} (script "swarm_tool.sh") "ensure" "crap4clj")
+      (let [wrapper (slurp (str (fs/path root ".swarmforge/bin/crap4clj")))]
+        (is (not (str/includes? wrapper "constitution-tools.lock")))
+        (is (not (str/includes? wrapper "SWARMFORGE_TOOL_HELD"))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest ready-for-next-treats-blank-receive-mode-as-task
+  (let [root (tmp-dir)]
+    (try
+      (init-repo! root)
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "sender\tmaster\t%s\tsession\tSender\tcodex\t\n" root))
+      (doseq [dir [".swarmforge/handoffs/outbox/tmp"
+                   ".swarmforge/handoffs/sent"
+                   ".swarmforge/handoffs/failed"
+                   ".swarmforge/handoffs/inbox/new"
+                   ".swarmforge/handoffs/inbox/in_process"
+                   ".swarmforge/handoffs/inbox/completed"]]
+        (fs/create-dirs (fs/path root dir)))
+      (let [mode (run {:dir root :env {"SWARMFORGE_ROLE" "sender"}}
+                      (script "handoff_lib.bb") "role-receive-mode" "sender")
+            ready (run {:dir root :env {"SWARMFORGE_ROLE" "sender"} :ok? false}
+                       (script "ready_for_next.sh"))]
+        (is (str/includes? (:out mode) "task"))
+        (is (zero? (:exit ready)))
+        (is (str/includes? (:out ready) "NO_TASK")))
+      (write-file (fs/path root ".swarmforge/handoffs/inbox/in_process/50_item.handoff")
+                  (str "id: 1\n"
+                       "from: sender\n"
+                       "to: sender\n"
+                       "priority: 50\n"
+                       "type: note\n"
+                       "task: HTW\n"
+                       "\n"
+                       "body\n"))
+      (let [done (run {:dir root :env {"SWARMFORGE_ROLE" "sender"} :ok? false}
+                      (script "done_with_current.sh"))]
+        (is (zero? (:exit done)))
+        (is (str/includes? (:out done) "COMPLETED:"))
+        (is (re-find #"MAIL_WAITING|NO_TASK" (:out done))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest ready-for-next-unknown-role-fails
+  (let [root (tmp-dir)]
+    (try
+      (init-repo! root)
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "sender\tmaster\t%s\tsession\tSender\tcodex\ttask\n" root))
+      (let [ready (run {:dir root :env {"SWARMFORGE_ROLE" "ghost"} :ok? false}
+                       (script "ready_for_next.sh"))
+            done (run {:dir root :env {"SWARMFORGE_ROLE" "ghost"} :ok? false}
+                      (script "done_with_current.sh"))]
+        (is (not (zero? (:exit ready))))
+        (is (str/includes? (str (:err ready) (:out ready)) "Unknown role"))
+        (is (not (zero? (:exit done))))
+        (is (str/includes? (str (:err done) (:out done)) "Unknown role")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest finish-done-logs-archive-throw-and-still-announces
+  (let [root (tmp-dir)
+        lib (fs/path root "handoff_lib.bb")]
+    (try
+      (init-repo! root)
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "sender\tmaster\t%s\tsession\tSender\tcodex\ttask\n" root))
+      (fs/create-dirs (fs/path root ".swarmforge/handoffs/inbox/new"))
+      (fs/copy (script "handoff_lib.bb") lib)
+      (let [result (run {:dir root :env {"SWARMFORGE_ROLE" "sender"} :ok? false}
+                        "bb" (str lib) "finish-done")]
+        (is (zero? (:exit result)))
+        (is (re-find #"MAIL_WAITING|NO_TASK" (:out result)))
+        (is (str/includes? (str (:err result)) "archive failed"))
+        (is (str/includes? (str (:err result)) "sender"))
+        (is (str/includes? (str (:err result)) (str root))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest pack-web-production-main-does-not-run-test-flags
+  (let [result (run {:dir repo-root :ok? false}
+                    "bb" (script "pack_web.bb") "--test-html")]
+    (is (not (zero? (:exit result))))
+    (is (str/includes? (slurp (script "pack_web.bb")) "--serve"))
+    (is (not (re-find #"--test-state\" \(test-state!" (slurp (script "pack_web.bb")))))
+    (is (str/includes? (slurp (str (fs/path repo-root "test/swarmforge/pack_web_test.bb"))) "--test-state"))))
+
+(deftest get-swarm-forge-copies-only-swarmforge-owned-paths
+  (let [host (tmp-dir)
+        base (tmp-dir)
+        packs (tmp-dir)]
+    (try
+      (write-file (fs/path host "README.md") "host-readme\n")
+      (write-file (fs/path host "bb.edn") "{:paths [\"test\"]}\n")
+      (write-file (fs/path host "test/keep.clj") "keep\n")
+      (doseq [name ["swarmforge.sh" "handoffd.bb" "done_with_current.sh"]]
+        (write-file (fs/path base "swarmforge/scripts" name) (str name "\n")))
+      (write-file (fs/path base "swarm") "#!/bin/sh\necho swarm\n")
+      (write-file (fs/path base "swarmforge/constitution.prompt") "MAIN-CONSTITUTION\n")
+      (write-file (fs/path base "swarmforge/roles/lieutenant.prompt") "LIEUTENANT\n")
+      (write-file (fs/path base "swarmforge/swarmforge.conf") "# Lieutenant grok\n")
+      (write-file (fs/path base "swarmforge/constitution/articles/engineering.prompt") "MAIN-ENGINEERING\n")
+      (write-file (fs/path base "swarmforge/constitution/articles/workflow.prompt") "MAIN-WORKFLOW\n")
+      (write-file (fs/path base "swarmforge/constitution/articles/handoffs.prompt") "MAIN-HANDOFFS\n")
+      (doseq [pack-name ["two-pack" "four-pack" "six-pack"]]
+        (let [pack (fs/path packs pack-name)]
+          (write-file (fs/path pack "swarm") "#!/bin/sh\necho swarm\n")
+          (write-file (fs/path pack "README.md") "pack-readme\n")
+          (write-file (fs/path pack "bb.edn") "pack-bb\n")
+          (write-file (fs/path pack "swarmforge/swarmforge.conf")
+                      "window specifier grok master\n")
+          (write-file (fs/path pack "swarmforge/constitution.prompt") "PACK-CONSTITUTION\n")
+          (write-file (fs/path pack "swarmforge/roles/specifier.prompt") "specifier\n")
+          (write-file (fs/path pack "swarmforge/constitution/articles/engineering.prompt") "PACK-STALE-ENGINEERING\n")
+          (write-file (fs/path pack "swarmforge/constitution/articles/project.prompt") "PACK-PROJECT\n")
+          (write-file (fs/path pack "swarmforge/constitution/articles/local-workflow.prompt") "PACK-LOCAL-WORKFLOW\n")))
+      (let [result (run {:dir host
+                         :env {"SWARMFORGE_BASE_DIR" (str base)
+                               "SWARMFORGE_PACKS_DIR" (str packs)}}
+                        (str (fs/path repo-root "get-swarm-forge")))]
+        (is (zero? (:exit result)) (:err result))
+        (is (= "host-readme\n" (slurp (str (fs/path host "README.md")))))
+        (is (= "{:paths [\"test\"]}\n" (slurp (str (fs/path host "bb.edn")))))
+        (is (= "keep\n" (slurp (str (fs/path host "test/keep.clj")))))
+        (is (= "MAIN-ENGINEERING\n" (slurp (str (fs/path host "swarmforge/constitution/articles/engineering.prompt")))))
+        (is (= "MAIN-WORKFLOW\n" (slurp (str (fs/path host "swarmforge/constitution/articles/workflow.prompt")))))
+        (is (= "MAIN-HANDOFFS\n" (slurp (str (fs/path host "swarmforge/constitution/articles/handoffs.prompt")))))
+        (is (= "MAIN-CONSTITUTION\n" (slurp (str (fs/path host "swarmforge/constitution.prompt")))))
+        (is (fs/exists? (fs/path host "swarmforge/roles/lieutenant.prompt")))
+        (is (fs/exists? (fs/path host "swarmforge/swarmforge.conf")))
+        (is (not (fs/exists? (fs/path host "swarmforge/roles/specifier.prompt"))))
+        (is (not (fs/exists? (fs/path host "swarmforge/constitution/articles/project.prompt"))))
+        (is (= "PACK-PROJECT\n" (slurp (str (fs/path host "packs/two-pack/swarmforge/constitution/articles/project.prompt")))))
+        (is (= "PACK-LOCAL-WORKFLOW\n" (slurp (str (fs/path host "packs/four-pack/swarmforge/constitution/articles/local-workflow.prompt")))))
+        (is (fs/directory? (fs/path host "projects")))
+        (is (fs/exists? (fs/path host "packs/six-pack/swarmforge/swarmforge.conf")))
+        (is (fs/exists? (fs/path host "swarm"))))
+      (finally
+        (fs/delete-tree host)
+        (fs/delete-tree base)
+        (fs/delete-tree packs)))))

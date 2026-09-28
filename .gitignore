@@ -1,8 +1,14 @@
 .DS_Store
 .env
 .claude/
+.cpcache/
+.superpowers/
 .swarmforge/
 .worktrees/
 swarmtools/
 logs/
 agent_context/
+target/
+node_modules/
+test-results/
+playwright-report/
