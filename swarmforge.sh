@@ -235,10 +235,11 @@ worktree_path_for_name() {
 }
 
 # Pack configs (upstream's Babashka format: window-invisible, receive/propagation
-# tokens, extra CLI args) belong to ./swarm, not this launcher. Detect them before
-# anything touches the project -- this launcher git-inits and prunes files first.
-refuse_pack_config() {
-  [[ -f "$CONFIG_FILE" ]] || return 0
+# tokens, extra CLI args) belong to the project's ./swarm, not this launcher, so
+# `swarmforge` hands them off. Detect them before anything touches the project --
+# this launcher git-inits and prunes files first.
+is_pack_config() {
+  [[ -f "$CONFIG_FILE" ]] || return 1
   local line
   local -a fields
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -246,11 +247,20 @@ refuse_pack_config() {
     (( ${#fields[@]} )) || continue
     [[ "${fields[1]}" == \#* ]] && continue
     if [[ "${fields[1]}" == "window-invisible" ]] || (( ${#fields[@]} > 5 )); then
-      echo -e "${RED}Error:${RESET} $CONFIG_FILE is a pack config, which this launcher cannot run."
-      echo -e "Launch it with ${BOLD}./swarm${RESET} from $WORKING_DIR instead."
-      exit 1
+      return 0
     fi
   done < "$CONFIG_FILE"
+  return 1
+}
+
+hand_off_pack_config() {
+  is_pack_config || return 0
+  if [[ -x "$WORKING_DIR/swarm" ]]; then
+    exec "$WORKING_DIR/swarm" "$WORKING_DIR"
+  fi
+  echo -e "${RED}Error:${RESET} $CONFIG_FILE is a pack config, but $WORKING_DIR/swarm is missing."
+  echo -e "Install the pack launcher with ${BOLD}get-swarm-forge <pack>${RESET} from $WORKING_DIR."
+  exit 1
 }
 
 parse_config() {
@@ -924,7 +934,7 @@ choose_cleanup_owner() {
   CLEANUP_OWNER_INDEX=1
 }
 
-refuse_pack_config
+hand_off_pack_config
 check_dependency tmux
 check_dependency git
 detect_tmux_base_indexes

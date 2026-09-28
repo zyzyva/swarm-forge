@@ -141,19 +141,39 @@
       (finally
         (fs/delete-tree root)))))
 
-(deftest legacy-launcher-redirects-pack-config-to-swarm-before-touching-project
+(defn write-pack-config! [root]
+  (write-file (fs/path root "swarmforge/constitution.prompt")
+              "Read articles.\n")
+  (write-file (fs/path root "swarmforge/swarmforge.conf")
+              (str "# pack config\n"
+                   "window-invisible coder claude master --model claude-opus-5-5\n")))
+
+(deftest legacy-launcher-hands-pack-config-to-project-swarm
+  (let [root (tmp-dir)
+        marker (fs/path root "swarm-called")]
+    (try
+      (write-pack-config! root)
+      (write-file (fs/path root "swarm")
+                  (str "#!/bin/sh\nprintf '%s' \"$*\" > '" marker "'\n"))
+      (fs/set-posix-file-permissions (fs/path root "swarm") "rwxr-xr-x")
+      (let [result (run {:dir root :ok? false}
+                        "zsh" (str (fs/path repo-root "swarmforge.sh")) (str root))]
+        (is (= 0 (:exit result)))
+        (is (= (str root) (slurp (str marker))))
+        (is (not (fs/exists? (fs/path root ".git"))))
+        (is (not (fs/exists? (fs/path root ".swarmforge")))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest legacy-launcher-refuses-pack-config-without-project-swarm
   (let [root (tmp-dir)]
     (try
-      (write-file (fs/path root "swarmforge/constitution.prompt")
-                  "Read articles.\n")
-      (write-file (fs/path root "swarmforge/swarmforge.conf")
-                  (str "# pack config\n"
-                       "window-invisible coder claude master --model claude-opus-5-5\n"))
+      (write-pack-config! root)
       (let [result (run {:dir root :ok? false}
                         "zsh" (str (fs/path repo-root "swarmforge.sh")) (str root))
             output (str (:out result) (:err result))]
         (is (= 1 (:exit result)))
-        (is (str/includes? output "./swarm"))
+        (is (str/includes? output "get-swarm-forge"))
         (is (not (str/includes? output "expected 4-5 fields")))
         (is (not (fs/exists? (fs/path root ".git"))))
         (is (not (fs/exists? (fs/path root ".swarmforge")))))
