@@ -234,6 +234,25 @@ worktree_path_for_name() {
   echo "$WORKTREES_DIR/$1"
 }
 
+# Pack configs (upstream's Babashka format: window-invisible, receive/propagation
+# tokens, extra CLI args) belong to ./swarm, not this launcher. Detect them before
+# anything touches the project -- this launcher git-inits and prunes files first.
+refuse_pack_config() {
+  [[ -f "$CONFIG_FILE" ]] || return 0
+  local line
+  local -a fields
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    fields=(${=line})
+    (( ${#fields[@]} )) || continue
+    [[ "${fields[1]}" == \#* ]] && continue
+    if [[ "${fields[1]}" == "window-invisible" ]] || (( ${#fields[@]} > 5 )); then
+      echo -e "${RED}Error:${RESET} $CONFIG_FILE is a pack config, which this launcher cannot run."
+      echo -e "Launch it with ${BOLD}./swarm${RESET} from $WORKING_DIR instead."
+      exit 1
+    fi
+  done < "$CONFIG_FILE"
+}
+
 parse_config() {
   if [[ ! -f "$CONFIG_FILE" ]]; then
     echo -e "${RED}Error:${RESET} Config not found at $CONFIG_FILE"
@@ -905,6 +924,7 @@ choose_cleanup_owner() {
   CLEANUP_OWNER_INDEX=1
 }
 
+refuse_pack_config
 check_dependency tmux
 check_dependency git
 detect_tmux_base_indexes
