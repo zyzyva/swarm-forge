@@ -514,6 +514,27 @@
         (finally
           (fs/delete-tree root))))))
 
+(deftest claude-launch-command-strips-anthropic-api-key
+  ;; Given a claude pack role and a shell that may export ANTHROPIC_API_KEY
+  ;; When SwarmForge builds the launch command
+  ;; Then claude starts with the key unset, so it authenticates through the
+  ;; claude.ai login instead of billing (or failing on) an exported key,
+  ;; unless SWARMFORGE_CLAUDE_USE_API_KEY=1 asks to keep it
+  (let [root (tmp-dir)]
+    (try
+      (let [launch (fn [env agent]
+                     (:out (run {:dir root :env env}
+                                (script "swarmforge.bb")
+                                "--test-launch-command"
+                                (str root)
+                                agent)))]
+        (is (str/includes? (launch {} "claude") "env -u ANTHROPIC_API_KEY claude "))
+        (is (not (str/includes? (launch {"SWARMFORGE_CLAUDE_USE_API_KEY" "1"} "claude")
+                                "ANTHROPIC_API_KEY")))
+        (is (not (str/includes? (launch {} "codex") "ANTHROPIC_API_KEY"))))
+      (finally
+        (fs/delete-tree root)))))
+
 (deftest launch-command-puts-project-tool-bin-on-path
   ;; Given a launched role
   ;; When the start command is built

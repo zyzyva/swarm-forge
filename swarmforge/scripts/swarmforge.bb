@@ -488,6 +488,15 @@
     "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 "
     ""))
 
+(defn claude-key-env []
+  ;; Unset ANTHROPIC_API_KEY so claude authenticates through the claude.ai
+  ;; login and never bills (or fails on) a key the shell happens to export.
+  ;; Measured 2026-09-27: an exported out-of-credit key failed every call.
+  ;; SWARMFORGE_CLAUDE_USE_API_KEY=1 keeps the key.
+  (if (= "1" (System/getenv "SWARMFORGE_CLAUDE_USE_API_KEY"))
+    ""
+    "env -u ANTHROPIC_API_KEY "))
+
 (defn no-alt-screen-flag [agent row]
   (if (and (#{"codex" "copilot"} agent)
            (not (extra-has? row "--no-alt-screen")))
@@ -514,6 +523,7 @@
     (cond-> (str base
                 (case agent
                   "claude" (str (alt-screen-env agent row)
+                                (claude-key-env)
                                 "claude --append-system-prompt-file " (sq (str prompt-file)) " "
                                 (yolo-flag agent row) "-n " (sq (str "SwarmForge " display)) " "
                                 (extra-args-prefix row)
