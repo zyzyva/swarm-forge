@@ -259,6 +259,32 @@ A few things to keep in mind:
 
 See `examples/clojureHTW-pairs/swarmforge/coder.base.prompt` and `reviewer.base.prompt` for a worked example of skill usage in role prompts.
 
+## MCP Servers
+
+The role that runs in the main working directory (`master` in `swarmforge.conf`) sees the project's normal MCP configuration — its `.mcp.json`, your user-scoped servers, everything Claude Code would load if you started a session there by hand.
+
+Worktree roles do not. They launch with `--strict-mcp-config`, which loads only what `--mcp-config` names, so by default they get no MCP servers at all. This is deliberate: Claude Code resolves a worktree to its parent project, so without the flag every role would load the project's `.mcp.json` and act under whatever identity it carries (a bus repo naming itself in an `X-Architect` header, for instance), and a trust prompt answered in one role would silently apply to all of them.
+
+To give a worktree role servers of its own, drop a Claude Code MCP config at `swarmforge/mcp/<role>.json`:
+
+```json
+{
+  "mcpServers": {
+    "bus": {
+      "type": "http",
+      "url": "http://192.168.1.101:8181/mcp",
+      "headers": { "X-Architect": "myrepo-coder" }
+    }
+  }
+}
+```
+
+That file — and nothing else — is passed to the role. Lookup falls back to the base role name, so `coder-2` uses `coder.json` unless `coder-2.json` exists. Give each role its own identity on identity-bearing servers rather than reusing the project's: two sessions sharing one name share one mailbox and one read offset, and will consume each other's messages.
+
+The alternative is `SWARMFORGE_WORKTREE_MCP=1` (set it in `swarmforge/swarmforge.env` to make it a property of the project). That drops `--strict-mcp-config` entirely and lets worktree roles load the project's own MCP config, identity included — convenient when no server in it cares who is calling.
+
+Changes take effect at role launch, so restart the role (or the swarm) after adding or editing one of these files.
+
 ## Mixed-Model Swarms With The `aider` Backend
 
 The `aider` backend lets you run open-source or third-party models alongside Claude in the same swarm. Aider supports any model provider that offers an OpenAI-compatible API (Fireworks, Together, OpenRouter, Groq, local Ollama, etc.) via LiteLLM.

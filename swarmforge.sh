@@ -711,8 +711,10 @@ launch_role() {
       ;;
   esac
 
-  # Pick the model per role. Opus 5 is the default for most roles; the
-  # architect defaults to Fable 5 (frontier planning). For claude and
+  # Pick the model per role. Opus 5.5 is the default for most roles; the
+  # architect defaults to Fable 5.1 (frontier planning). Both point releases
+  # were verified to resolve on Claude Code 2.1.283 (2026-09-27); a CLI older
+  # than that may not know them. For claude and
   # codex backends this selects an Anthropic model; for aider
   # it can be any provider/model string that aider supports
   # (e.g. fireworks_ai/accounts/fireworks/models/kimi-k2-6). Per-role
@@ -723,20 +725,19 @@ launch_role() {
   local agent_model
   case "$role" in
     architect|architect-*)
-      agent_model="${SWARMFORGE_ARCHITECT_MODEL:-${SWARMFORGE_MODEL:-claude-fable-5}}"
+      agent_model="${SWARMFORGE_ARCHITECT_MODEL:-${SWARMFORGE_MODEL:-claude-fable-5-1}}"
       ;;
     coder|coder-*)
       agent_model="${SWARMFORGE_CODER_MODEL:-${SWARMFORGE_MODEL:-claude-sonnet-5}}"
       ;;
     reviewer|reviewer-*)
-      agent_model="${SWARMFORGE_REVIEWER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5}}"
+      agent_model="${SWARMFORGE_REVIEWER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5-5}}"
       ;;
     qa|qa-*)
-      agent_model="${SWARMFORGE_QA_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5}}"
+      agent_model="${SWARMFORGE_QA_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5-5}}"
       ;;
     cleaner|cleaner-*)
-      # The two-pack's quality/audit seat. Requires a CLI new enough to know
-      # Opus 5.5 (claude-opus-5-5); update Claude Code before launching.
+      # The two-pack's quality/audit seat. Opus 5.5, as for reviewer and qa.
       agent_model="${SWARMFORGE_CLEANER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5-5}}"
       ;;
     *)
@@ -798,13 +799,25 @@ launch_role() {
   # once.
   #
   # Note this leaves worktree roles with NO MCP servers, user-scoped ones
-  # included, since --strict-mcp-config honours only --mcp-config. Set
-  # SWARMFORGE_WORKTREE_MCP=1 to opt a project back into sharing them.
+  # included, since --strict-mcp-config honours only --mcp-config. Two ways to
+  # hand them servers back:
+  #
+  #   - swarmforge/mcp/<role>.json, falling back to the base role name so
+  #     coder-2 reads coder.json. That file is passed with --mcp-config, so the
+  #     role gets exactly the servers it lists under whatever identity the file
+  #     carries. This is how a role joins an identity-bearing server without
+  #     impersonating the project: give it its own name (X-Architect:
+  #     myrepo-coder) rather than the one in the project's .mcp.json.
+  #   - SWARMFORGE_WORKTREE_MCP=1 opts the whole project back into sharing its
+  #     own MCP config, identity included.
   local mcp_flag=""
   if [[ "${SWARMFORGE_WORKTREE_MCP:-0}" != "1" ]]; then
     local role_worktree_name="${WORKTREE_NAMES[$index]}"
     if [[ "$role_worktree_name" != "master" && "$role_worktree_name" != "none" ]]; then
       mcp_flag="--strict-mcp-config "
+      local role_mcp_file="$SWARM_FORGE_DIR/mcp/${role}.json"
+      [[ -f "$role_mcp_file" ]] || role_mcp_file="$SWARM_FORGE_DIR/mcp/${role%%-*}.json"
+      [[ -f "$role_mcp_file" ]] && mcp_flag+="--mcp-config '$role_mcp_file' "
     fi
   fi
 
@@ -815,7 +828,22 @@ launch_role() {
       # export so providers like MiniMax aren't sent a param they may reject.
       local effort_env="export CLAUDE_CODE_EFFORT_LEVEL='$agent_effort' && "
       [[ -n "$agent_base_url" ]] && effort_env=""
-      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && ${provider_env}${effort_env}cd '$role_worktree' && claude ${model_flag}${mcp_flag}--append-system-prompt-file '$prompt_file' --permission-mode '$agent_permission' -n 'SwarmForge ${display}' \"\$(cat '$prompt_file')\""
+      # Strip ANTHROPIC_API_KEY so claude sessions auth via the claude.ai login
+      # and can never bill (or fail on) an API key the shell happens to export.
+      # Mirrors the grok branch's XAI_API_KEY handling. Measured 2026-09-27: the
+      # key exported from ~/.zprofile was out of credit, and a role launched
+      # with it in scope fails every call with "Credit balance is too low"
+      # while the same role without it works. Skipped when the role is routed
+      # to a non-Anthropic endpoint (agent_base_url set): provider_env carries
+      # ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN, but some compatible
+      # providers read the key variable instead, so a routed role keeps
+      # whatever the shell gave it. Set SWARMFORGE_CLAUDE_USE_API_KEY=1 to keep
+      # the key for a direct-to-Anthropic role too.
+      local claude_env="env -u ANTHROPIC_API_KEY "
+      if [[ -n "$agent_base_url" || "${SWARMFORGE_CLAUDE_USE_API_KEY:-0}" == "1" ]]; then
+        claude_env=""
+      fi
+      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && ${provider_env}${effort_env}cd '$role_worktree' && ${claude_env}claude ${model_flag}${mcp_flag}--append-system-prompt-file '$prompt_file' --permission-mode '$agent_permission' -n 'SwarmForge ${display}' \"\$(cat '$prompt_file')\""
       ;;
     codex)
       launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && codex -C '$role_worktree' \"\$(cat '$prompt_file')\""
