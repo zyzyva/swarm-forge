@@ -534,6 +534,25 @@
       (finally
         (fs/delete-tree root)))))
 
+(deftest claude-launch-command-honors-explicit-permission-mode
+  ;; Given a claude pack role whose conf line names its own --permission-mode
+  ;; When SwarmForge builds the launch command
+  ;; Then that mode is the only one on the command line -- the bypass default
+  ;; is not prepended ahead of it
+  (let [root (tmp-dir)]
+    (try
+      (let [command (:out (run {:dir root}
+                               (script "swarmforge.bb")
+                               "--test-launch-command"
+                               (str root)
+                               "claude"
+                               "--model claude-opus-5-5 --permission-mode auto"))]
+        (is (str/includes? command "--permission-mode auto"))
+        (is (not (str/includes? command "bypassPermissions")))
+        (is (= 1 (count (re-seq #"--permission-mode" command)))))
+      (finally
+        (fs/delete-tree root)))))
+
 (deftest launch-command-yolos-every-backend
   ;; Given a pack role with no extra-args
   ;; When --test-launch-command for each backend

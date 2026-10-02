@@ -469,7 +469,12 @@
   (case agent
     "codex" (if (extra-has? row "--yolo") "" "--yolo ")
     "copilot" (if (extra-has? row "--yolo") "" "--yolo ")
-    "claude" (if (extra-has? row "bypassPermissions") "" "--permission-mode bypassPermissions ")
+    ;; A conf line that names its own --permission-mode (e.g. auto) owns the
+    ;; mode; prepending the bypass default would put two on the command line.
+    "claude" (if (or (extra-has? row "--permission-mode")
+                     (extra-has? row "bypassPermissions"))
+               ""
+               "--permission-mode bypassPermissions ")
     ""))
 
 (defn grok-permission-prefix [row]

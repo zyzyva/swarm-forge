@@ -264,6 +264,8 @@
   (is (= "" (swarmforge/yolo-flag "codex" {:extra-args "--yolo"})))
   (is (= "--permission-mode bypassPermissions "
          (swarmforge/yolo-flag "claude" {:extra-args ""})))
+  (is (= "" (swarmforge/yolo-flag "claude" {:extra-args "--permission-mode auto"})))
+  (is (= "" (swarmforge/yolo-flag "claude" {:extra-args "--permission-mode=acceptEdits"})))
   (is (= "" (swarmforge/yolo-flag "unknown" {:extra-args ""})))
   (is (swarmforge/skip-config-line? "# hi"))
   (is (swarmforge/skip-config-line? ""))
