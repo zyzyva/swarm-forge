@@ -715,6 +715,8 @@ launch_role() {
   # fallback. All roles default to xhigh; the frontier roles (Opus reviewer/QA,
   # Fable architect) and the Sonnet coder all honor xhigh and benefit from it.
   # Override per-role with SWARMFORGE_<ROLE>_EFFORT (e.g. SWARMFORGE_CODER_EFFORT=high).
+  # The value "unset" pins nothing: the role launches with
+  # CLAUDE_CODE_EFFORT_LEVEL unset and Claude Code picks its own effort.
   # Effort levels are a Claude Code concept and do not apply to the aider
   # backend.
   local agent_effort
@@ -856,6 +858,7 @@ launch_role() {
       # routed to a non-Anthropic endpoint (provider_env set), skip the effort
       # export so providers like MiniMax aren't sent a param they may reject.
       local effort_env="export CLAUDE_CODE_EFFORT_LEVEL='$agent_effort' && "
+      [[ "$agent_effort" == "unset" ]] && effort_env="unset CLAUDE_CODE_EFFORT_LEVEL && "
       [[ -n "$agent_base_url" ]] && effort_env=""
       # Strip ANTHROPIC_API_KEY so claude sessions auth via the claude.ai login
       # and can never bill (or fail on) an API key the shell happens to export.

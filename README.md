@@ -390,7 +390,7 @@ Copy these sections into your project's role prompts when using a less capable m
 ### Limitations
 
 - Skills are a Claude Code feature and are not available to the `aider` backend.
-- Effort levels (`SWARMFORGE_EFFORT`, `SWARMFORGE_CODER_EFFORT`, etc.) are a Claude Code concept and do not apply to aider.
+- Effort levels (`SWARMFORGE_EFFORT`, `SWARMFORGE_CODER_EFFORT`, etc.) are a Claude Code concept and do not apply to aider. Set one to `unset` to launch the role with `CLAUDE_CODE_EFFORT_LEVEL` unset, so Claude Code chooses the effort itself.
 - Slash commands like `/compact` and `/clear` are Claude Code features. Use `/reset` in aider to clear its context instead.
 - The sidecar command runner uses `eval` — the deny list blocks known-dangerous patterns but is not a sandbox. For high-security environments, run the swarm in a container.
 
