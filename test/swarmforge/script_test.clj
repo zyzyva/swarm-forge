@@ -1274,3 +1274,36 @@
         (fs/delete-tree host)
         (fs/delete-tree base)
         (fs/delete-tree packs)))))
+
+(defn resolved-model [root env role]
+  (str/trim (:out (run {:dir root :env env}
+                       "zsh" (str (fs/path repo-root "swarmforge.sh"))
+                       (str root) "--print-model" role))))
+
+(deftest launcher-model-defaults-follow-the-fleet-rule
+  ;; Given no model settings anywhere
+  ;; When the launcher resolves each role's model
+  ;; Then architect, lead and specifier get Opus 5.5 and coder gets Sonnet 5.5
+  (let [root (tmp-dir)]
+    (try
+      (doseq [[role model] [["architect" "claude-opus-5-5"]
+                            ["lead" "claude-opus-5-5"]
+                            ["specifier" "claude-opus-5-5"]
+                            ["coder" "claude-sonnet-5-5"]]]
+        (is (= model (resolved-model root {} role)) role))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest launcher-explicit-model-settings-beat-the-defaults
+  ;; Given a per-role pin, and separately a shared fallback
+  ;; When the launcher resolves models
+  ;; Then the per-role pin wins over the shared one, which wins over the default
+  (let [root (tmp-dir)]
+    (try
+      (is (= "pinned" (resolved-model root {"SWARMFORGE_LEAD_MODEL" "pinned"
+                                            "SWARMFORGE_MODEL" "shared"} "lead")))
+      (is (= "pinned" (resolved-model root {"SWARMFORGE_SPECIFIER_MODEL" "pinned"} "specifier")))
+      (is (= "shared" (resolved-model root {"SWARMFORGE_MODEL" "shared"} "architect")))
+      (is (= "pinned" (resolved-model root {"SWARMFORGE_CODER_MODEL" "pinned"} "coder")))
+      (finally
+        (fs/delete-tree root)))))

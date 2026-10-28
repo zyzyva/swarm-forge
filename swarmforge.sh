@@ -688,6 +688,53 @@ send_initial_grok_prompt() {
   ) &!
 }
 
+# Model per role. Fleet rule (operator-set 2026-10-28): architects run Opus
+# 5.5 and coders run Sonnet 5.5. The lead and specifier roles do the
+# architect's job under another name, so they default to the architect's
+# model. Reviewer, qa and cleaner stay on Opus 5.5; any other role inherits the
+# backend default. Both 5.5 models need Claude Code 2.1.280 or newer; an older
+# CLI gets a 400 from the API. For claude and codex backends this selects an
+# Anthropic model; for aider it can be any provider/model string that aider
+# supports (e.g. fireworks_ai/accounts/fireworks/models/kimi-k2-6). Per-role
+# env vars win; SWARMFORGE_MODEL is a shared fallback. Empty string means "let
+# the backend inherit its own default".
+agent_model_for_role() {
+  local role="$1"
+  case "$role" in
+    architect|architect-*)
+      print -r -- "${SWARMFORGE_ARCHITECT_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5-5}}"
+      ;;
+    lead|lead-*)
+      print -r -- "${SWARMFORGE_LEAD_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5-5}}"
+      ;;
+    specifier|specifier-*)
+      print -r -- "${SWARMFORGE_SPECIFIER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5-5}}"
+      ;;
+    coder|coder-*)
+      print -r -- "${SWARMFORGE_CODER_MODEL:-${SWARMFORGE_MODEL:-claude-sonnet-5-5}}"
+      ;;
+    reviewer|reviewer-*)
+      print -r -- "${SWARMFORGE_REVIEWER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5-5}}"
+      ;;
+    qa|qa-*)
+      print -r -- "${SWARMFORGE_QA_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5-5}}"
+      ;;
+    cleaner|cleaner-*)
+      # The two-pack's quality/audit seat. Opus 5.5, as for reviewer and qa.
+      print -r -- "${SWARMFORGE_CLEANER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5-5}}"
+      ;;
+    *)
+      # Per-role model for roles beyond those above, mirroring the effort
+      # lookup: SWARMFORGE_<ROLE>_MODEL (role uppercased, non-alphanumerics -> _,
+      # so resilience reads SWARMFORGE_RESILIENCE_MODEL). Falls back to shared
+      # SWARMFORGE_MODEL; empty means the backend inherits its own default.
+      local model_role_key="${${role:u}//[^A-Z0-9]/_}"
+      local role_model_var="SWARMFORGE_${model_role_key}_MODEL"
+      print -r -- "${(P)role_model_var:-${SWARMFORGE_MODEL:-}}"
+      ;;
+  esac
+}
+
 launch_role() {
   local index="$1"
   local role="${ROLES[$index]}"
@@ -712,8 +759,8 @@ launch_role() {
   # Pin the Claude Code effort level per role so each agent runs at an
   # appropriate reasoning budget regardless of shell or tmux env
   # inheritance. Per-role env vars win; SWARMFORGE_EFFORT is a shared
-  # fallback. All roles default to xhigh; the frontier roles (Opus reviewer/QA,
-  # Fable architect) and the Sonnet coder all honor xhigh and benefit from it.
+  # fallback. All roles default to xhigh; the frontier roles (Opus architect, reviewer, QA)
+  # and the Sonnet coder all honor xhigh and benefit from it.
   # Override per-role with SWARMFORGE_<ROLE>_EFFORT (e.g. SWARMFORGE_CODER_EFFORT=high).
   # The value "unset" pins nothing: the role launches with
   # CLAUDE_CODE_EFFORT_LEVEL unset and Claude Code picks its own effort.
@@ -742,45 +789,9 @@ launch_role() {
       ;;
   esac
 
-  # Pick the model per role. Opus 5.5 is the default for most roles; the
-  # architect defaults to Fable 5.1 (frontier planning). Both point releases
-  # were verified to resolve on Claude Code 2.1.283 (2026-09-27); a CLI older
-  # than that may not know them. For claude and
-  # codex backends this selects an Anthropic model; for aider
-  # it can be any provider/model string that aider supports
-  # (e.g. fireworks_ai/accounts/fireworks/models/kimi-k2-6). Per-role
-  # env vars win; SWARMFORGE_MODEL is a shared fallback. Empty string
-  # means "let the backend inherit its own default". The coder defaults to
-  # Sonnet for cost; override it back to Opus with
-  # SWARMFORGE_CODER_MODEL=claude-opus-5 when a run needs frontier coding.
   local agent_model
-  case "$role" in
-    architect|architect-*)
-      agent_model="${SWARMFORGE_ARCHITECT_MODEL:-${SWARMFORGE_MODEL:-claude-fable-5-1}}"
-      ;;
-    coder|coder-*)
-      agent_model="${SWARMFORGE_CODER_MODEL:-${SWARMFORGE_MODEL:-claude-sonnet-5}}"
-      ;;
-    reviewer|reviewer-*)
-      agent_model="${SWARMFORGE_REVIEWER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5-5}}"
-      ;;
-    qa|qa-*)
-      agent_model="${SWARMFORGE_QA_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5-5}}"
-      ;;
-    cleaner|cleaner-*)
-      # The two-pack's quality/audit seat. Opus 5.5, as for reviewer and qa.
-      agent_model="${SWARMFORGE_CLEANER_MODEL:-${SWARMFORGE_MODEL:-claude-opus-5-5}}"
-      ;;
-    *)
-      # Per-role model for roles beyond the legacy four, mirroring the effort
-      # lookup: SWARMFORGE_<ROLE>_MODEL (role uppercased, non-alphanumerics -> _,
-      # so resilience reads SWARMFORGE_RESILIENCE_MODEL). Falls back to shared
-      # SWARMFORGE_MODEL; empty means the backend inherits its own default.
-      local model_role_key="${${role:u}//[^A-Z0-9]/_}"
-      local role_model_var="SWARMFORGE_${model_role_key}_MODEL"
-      agent_model="${(P)role_model_var:-${SWARMFORGE_MODEL:-}}"
-      ;;
-  esac
+  agent_model="$(agent_model_for_role "$role")"
+
   local model_flag=""
   [[ -n "$agent_model" ]] && model_flag="--model '$agent_model' "
 
@@ -936,6 +947,12 @@ launch_role() {
 choose_cleanup_owner() {
   CLEANUP_OWNER_INDEX=1
 }
+
+# Test hook: print the model a role would launch with, then exit.
+if [[ "${2:-}" == "--print-model" ]]; then
+  agent_model_for_role "${3:?role required}"
+  exit 0
+fi
 
 hand_off_pack_config
 check_dependency tmux
