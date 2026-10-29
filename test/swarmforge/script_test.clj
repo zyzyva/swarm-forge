@@ -1307,3 +1307,35 @@
       (is (= "pinned" (resolved-model root {"SWARMFORGE_CODER_MODEL" "pinned"} "coder")))
       (finally
         (fs/delete-tree root)))))
+
+(defn resolved-grok-model [root env role]
+  (str/trim (:out (run {:dir root :env env}
+                       "zsh" (str (fs/path repo-root "swarmforge.sh"))
+                       (str root) "--print-grok-model" role))))
+
+(deftest grok-launcher-defaults-to-grok-4-7
+  ;; Given no model settings anywhere
+  ;; When the launcher resolves a grok seat's model
+  ;; Then every role gets grok-4.7 and never a Claude or Fable default
+  (let [root (tmp-dir)]
+    (try
+      (doseq [role ["architect" "lead" "specifier" "coder" "coder-2"
+                    "reviewer" "qa" "cleaner" "logger"]]
+        (is (= "grok-4.7" (resolved-grok-model root {} role)) role))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest grok-launcher-explicit-pins-beat-the-default
+  ;; Given a per-role pin, and separately a shared fallback
+  ;; When the launcher resolves a grok seat's model
+  ;; Then the per-role pin wins over the shared one, which wins over grok-4.7
+  (let [root (tmp-dir)]
+    (try
+      (is (= "pinned" (resolved-grok-model root {"SWARMFORGE_LEAD_MODEL" "pinned"
+                                                 "SWARMFORGE_MODEL" "shared"} "lead")))
+      (is (= "pinned" (resolved-grok-model root {"SWARMFORGE_CODER_MODEL" "pinned"} "coder")))
+      (is (= "pinned" (resolved-grok-model root {"SWARMFORGE_CODER_MODEL" "pinned"} "coder-2")))
+      (is (= "shared" (resolved-grok-model root {"SWARMFORGE_MODEL" "shared"} "reviewer")))
+      (is (= "grok-4.7" (resolved-grok-model root {"SWARMFORGE_CODER_MODEL" "claude-sonnet-5-5"} "lead")))
+      (finally
+        (fs/delete-tree root)))))

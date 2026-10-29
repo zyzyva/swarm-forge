@@ -688,16 +688,20 @@ send_initial_grok_prompt() {
   ) &!
 }
 
-# Model per role. Fleet rule (operator-set 2026-10-28): architects run Opus
-# 5.5 and coders run Sonnet 5.5. The lead and specifier roles do the
+# Model per role, for claude, codex, and aider windows.
+# Fleet rule for those windows (operator-set 2026-10-28): architects run
+# Opus 5.5 and coders run Sonnet 5.5. The lead and specifier roles do the
 # architect's job under another name, so they default to the architect's
-# model. Reviewer, qa and cleaner stay on Opus 5.5; any other role inherits the
-# backend default. Both 5.5 models need Claude Code 2.1.280 or newer; an older
-# CLI gets a 400 from the API. For claude and codex backends this selects an
-# Anthropic model; for aider it can be any provider/model string that aider
-# supports (e.g. fireworks_ai/accounts/fireworks/models/kimi-k2-6). Per-role
-# env vars win; SWARMFORGE_MODEL is a shared fallback. Empty string means "let
-# the backend inherit its own default".
+# model. Reviewer, qa and cleaner stay on Opus 5.5; any other role inherits
+# the backend default. There is no Fable default (operator-set 2026-10-29):
+# do not start a seat on Fable. Both 5.5 models need Claude Code 2.1.280 or
+# newer; an older CLI gets a 400 from the API. For claude and codex backends
+# this selects an Anthropic model; for aider it can be any provider/model
+# string that aider supports (e.g.
+# fireworks_ai/accounts/fireworks/models/kimi-k2-6). Per-role env vars win;
+# SWARMFORGE_MODEL is a shared fallback. Empty string means "let the backend
+# inherit its own default".
+# Grok windows do not use this function. See grok_model_for_role.
 agent_model_for_role() {
   local role="$1"
   case "$role" in
@@ -731,6 +735,42 @@ agent_model_for_role() {
       local model_role_key="${${role:u}//[^A-Z0-9]/_}"
       local role_model_var="SWARMFORGE_${model_role_key}_MODEL"
       print -r -- "${(P)role_model_var:-${SWARMFORGE_MODEL:-}}"
+      ;;
+  esac
+}
+
+# Model for a grok window. Operator-set 2026-10-29. An explicit per-role pin
+# wins, then the shared SWARMFORGE_MODEL pin, then grok-4.7. The Claude and
+# Fable names in agent_model_for_role are defaults for claude windows only
+# and are never handed to a grok seat. Claude windows keep today's behavior.
+grok_model_for_role() {
+  local role="$1"
+  case "$role" in
+    architect|architect-*)
+      print -r -- "${SWARMFORGE_ARCHITECT_MODEL:-${SWARMFORGE_MODEL:-grok-4.7}}"
+      ;;
+    lead|lead-*)
+      print -r -- "${SWARMFORGE_LEAD_MODEL:-${SWARMFORGE_MODEL:-grok-4.7}}"
+      ;;
+    specifier|specifier-*)
+      print -r -- "${SWARMFORGE_SPECIFIER_MODEL:-${SWARMFORGE_MODEL:-grok-4.7}}"
+      ;;
+    coder|coder-*)
+      print -r -- "${SWARMFORGE_CODER_MODEL:-${SWARMFORGE_MODEL:-grok-4.7}}"
+      ;;
+    reviewer|reviewer-*)
+      print -r -- "${SWARMFORGE_REVIEWER_MODEL:-${SWARMFORGE_MODEL:-grok-4.7}}"
+      ;;
+    qa|qa-*)
+      print -r -- "${SWARMFORGE_QA_MODEL:-${SWARMFORGE_MODEL:-grok-4.7}}"
+      ;;
+    cleaner|cleaner-*)
+      print -r -- "${SWARMFORGE_CLEANER_MODEL:-${SWARMFORGE_MODEL:-grok-4.7}}"
+      ;;
+    *)
+      local model_role_key="${${role:u}//[^A-Z0-9]/_}"
+      local role_model_var="SWARMFORGE_${model_role_key}_MODEL"
+      print -r -- "${(P)role_model_var:-${SWARMFORGE_MODEL:-grok-4.7}}"
       ;;
   esac
 }
@@ -915,7 +955,9 @@ launch_role() {
       case "$grok_permission" in
         always-approve|yolo) grok_permission="bypassPermissions" ;;
       esac
-      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && ${grok_env}grok --cwd '$role_worktree' --permission-mode '$grok_permission' --rules \"\$(cat '$prompt_file')\""
+      local grok_model
+      grok_model="$(grok_model_for_role "$role")"
+      launch_cmd="export SWARMFORGE_ROLE='$role' && export PATH='$SWARM_TOOLS_DIR:$SCRIPT_DIR':\$PATH && cd '$role_worktree' && ${grok_env}grok --cwd '$role_worktree' --model '$grok_model' --permission-mode '$grok_permission' --rules \"\$(cat '$prompt_file')\""
       ;;
   esac
 
@@ -951,6 +993,12 @@ choose_cleanup_owner() {
 # Test hook: print the model a role would launch with, then exit.
 if [[ "${2:-}" == "--print-model" ]]; then
   agent_model_for_role "${3:?role required}"
+  exit 0
+fi
+
+# Test hook: print the model a grok seat would launch with, then exit.
+if [[ "${2:-}" == "--print-grok-model" ]]; then
+  grok_model_for_role "${3:?role required}"
   exit 0
 fi
 
